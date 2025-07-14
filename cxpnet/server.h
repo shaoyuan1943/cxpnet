@@ -17,8 +17,12 @@ namespace cxpnet {
       thread_num_ = 0;
       main_poll_  = std::make_unique<IOEventPoll>();
       acceptor_   = std::make_unique<Acceptor>(main_poll_.get(), addr, port, proto_stack, option);
-      acceptor_->set_connection_callback(std::bind(&Server::_new_connection, this,
+      acceptor_->set_connection_callback(std::bind(&Server::_on_new_connection, this,
                                                    std::placeholders::_1, std::placeholders::_2));
+      acceptor_->set_acceptor_err_callback(std::bind(&Server::_on_acceptor_error, this,
+                                                     std::placeholders::_1));
+      main_poll_->set_error_callback(std::bind(&Server::_on_poll_error, this,
+                                               std::placeholders::_1, std::placeholders::_2));
     }
     ~Server() {}
     void shutdown() {
@@ -26,7 +30,7 @@ namespace cxpnet {
         acceptor_->shutdown();
       }
 
-      if(poll_thread_pool_) {
+      if (poll_thread_pool_) {
         poll_thread_pool_->shutdown();
       }
 
@@ -38,8 +42,12 @@ namespace cxpnet {
     }
 
     void set_thread_num(int n) { thread_num_ = n; }
-    void set_conn_callback(OnConnCallback conn_func) { on_conn_func_ = conn_func; }
-
+    void set_conn_user_callback(OnConnCallback conn_func) {
+      on_conn_func_ = std::move(conn_func);
+    }
+    void set_poll_err_user_callback(OnEventPollErrorCallback err_func) {
+      on_poll_err_func_ = std::move(err_func);
+    }
     void start(RunningMode mode) {
       if (thread_num_ <= 0 || started_) { return; }
 
@@ -47,7 +55,10 @@ namespace cxpnet {
       if (running_mode_ == RunningMode::kOnePollPerThread) {
         std::vector<IOEventPoll*> polls;
         for (auto i = 0; i < thread_num_; i++) {
-          sub_polls_.push_back(std::make_unique<IOEventPoll>());
+          auto poll = std::make_unique<IOEventPoll>();
+          poll->set_error_callback(std::bind(&Server::_on_poll_error, this,
+                                             std::placeholders::_1, std::placeholders::_2));
+          sub_polls_.push_back(poll);
           polls.push_back(sub_polls_[i].get());
         }
 
@@ -73,7 +84,13 @@ namespace cxpnet {
       main_poll_->poll();
     }
   private:
-    void _new_connection(int handle, struct sockaddr_storage addr_storage) {
+    void _on_acceptor_error(int err) {}
+    void _on_poll_error(IOEventPoll* event_poll, int err) {
+      if (on_poll_err_func_ != nullptr) {
+        on_poll_err_func_(event_poll, err);
+      }
+    }
+    void _on_new_connection(int handle, struct sockaddr_storage addr_storage) {
       if (handle == invalid_socket) { return; }
       char     client_ip_str[INET6_ADDRSTRLEN] = {0};
       uint16_t client_port                     = 0;
@@ -121,6 +138,7 @@ namespace cxpnet {
     std::unique_ptr<PollThreadPool>                poll_thread_pool_;
     RunningMode                                    running_mode_;
     std::unordered_map<int, std::shared_ptr<Conn>> conns_;
+    OnEventPollErrorCallback                       on_poll_err_func_ = nullptr;
   };
 } // namespace cxpnet
 

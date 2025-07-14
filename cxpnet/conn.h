@@ -25,6 +25,7 @@ namespace cxpnet {
       channel_->tie(shared_from_this());
       state_.store(static_cast<int>(State::kConnected), std::memory_order_release);
     }
+
     ~Conn() {
       platform::close_handle(handle_);
     }
@@ -61,7 +62,7 @@ namespace cxpnet {
       return state_.load(std::memory_order_acquire) == static_cast<int>(State::kConnected);
     }
 
-    void set_conn_callbacks(OnMessageCallback message_func, OnCloseCallback close_func) {
+    void set_conn_user_callbacks(OnMessageCallback message_func, OnCloseCallback close_func) {
       on_message_func_ = message_func;
       on_close_func_   = close_func;
     }

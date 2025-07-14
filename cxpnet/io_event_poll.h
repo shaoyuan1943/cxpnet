@@ -30,7 +30,7 @@ namespace cxpnet {
       wakeup_channel_->set_read_callback(std::bind(&IOEventPoll::_handle_wakeup, this));
       wakeup_channel_->add_read_event();
 
-      shutdown_flag_.store(false, std::memory_order_release);
+      shutted_.store(false, std::memory_order_release);
     }
 
     ~IOEventPoll() {
@@ -39,20 +39,22 @@ namespace cxpnet {
 
     // non-blocking
     void poll() {
-      if (!shutdown_flag_.load(std::memory_order_acquire)) { return; }
+      if (!shutted_.load(std::memory_order_acquire)) { return; }
       _poll(0);
     }
 
     // blocking
     void run() {
       thread_id_ = std::this_thread::get_id();
-      while (!shutdown_flag_.load(std::memory_order_acquire)) {
+      while (!shutted_.load(std::memory_order_acquire)) {
         _poll(kPollTimeoutMS);
       }
     }
 
     void shutdown() {
-      shutdown_flag_.store(true, std::memory_order_release);
+      if (shutted_.load(std::memory_order_acquire)) { return; }
+      
+      shutted_.store(true, std::memory_order_release);
       _notify_wakeup();
     }
     void run_in_poll(Closure func) {
@@ -68,7 +70,7 @@ namespace cxpnet {
     bool is_in_poll_thread() { return thread_id_ == std::this_thread::get_id(); }
     void update_channel(Channel* channel) { poller_->update_channel(channel); }
     void remove_channel(Channel* channel) { poller_->remove_channel(channel); }
-    void set_err_callback(OnEventPollErrorCallback err_func) { on_err_func_ = std::move(err_func); }
+    void set_error_callback(OnEventPollErrorCallback err_func) { on_err_func_ = std::move(err_func); }
   private:
     void _notify_wakeup() { platform::write_to_fd(wakeup_handle_); }
     void _handle_wakeup() { platform::read_from_fd(wakeup_handle_); }
@@ -103,7 +105,7 @@ namespace cxpnet {
     std::mutex               mutex_;
     std::thread::id          thread_id_;
     std::vector<Channel*>    active_channels_;
-    std::atomic<bool>        shutdown_flag_;
+    std::atomic<bool>        shutted_;
     OnEventPollErrorCallback on_err_func_ = nullptr;
   };
 } // namespace cxpnet
