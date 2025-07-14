@@ -19,6 +19,13 @@ namespace cxpnet {
       platform::close_handle(listen_handle_);
     }
 
+    void shutdown() {
+      if (channel_) {
+        channel_->clear_event();
+        channel_->remove();
+      }
+    }
+
     bool listen() {
       if (local_addr_storage_.ss_family == 0) { return false; }
       listen_handle_ = platform::listen(local_addr_storage_, proto_stack_, sock_option_);

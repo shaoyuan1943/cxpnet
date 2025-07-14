@@ -53,7 +53,7 @@ namespace cxpnet {
 
     void shutdown() {
       shutdown_flag_.store(true, std::memory_order_release);
-      notify_wakeup();
+      _notify_wakeup();
     }
     void run_in_poll(Closure func) {
       if (is_in_poll_thread()) {

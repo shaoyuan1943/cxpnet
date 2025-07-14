@@ -28,8 +28,8 @@ namespace cxpnet {
     ~Conn() {
       platform::close_handle(handle_);
     }
-    // graceful close
-    void graceful_close() {
+    // graceful
+    void shutdown() {
       if (!connected()) { return; }
       _set_state(State::kDisconnecting);
 
@@ -38,7 +38,8 @@ namespace cxpnet {
         if (!shared_this->channel_->writing()) { platform::shut_wr(shared_this->handle_); }
       });
     }
-    void force_close() {
+    // force
+    void close() {
       if (!connected()) { return; }
       _set_state(State::kDisconnecting);
 
@@ -60,13 +61,21 @@ namespace cxpnet {
       return state_.load(std::memory_order_acquire) == static_cast<int>(State::kConnected);
     }
 
-    void send(const std::string& msg, std::function<void(bool)> op_completed_func = nullptr) {
+    void set_conn_callbacks(OnMessageCallback message_func, OnCloseCallback close_func) {
+      on_message_func_ = message_func;
+      on_close_func_   = close_func;
+    }
+
+    void send(const std::string&        msg,
+              std::function<void(bool)> op_completed_func = nullptr) {
       send(msg.data(), msg.size(), op_completed_func);
     }
-    void send(const std::string_view msg, std::function<void(bool)> op_completed_func = nullptr) {
+    void send(const std::string_view    msg,
+              std::function<void(bool)> op_completed_func = nullptr) {
       send(msg.data(), msg.size(), op_completed_func);
     }
-    void send(const char* msg, size_t size, std::function<void(bool)> op_completed_func = nullptr) {
+    void send(const char* msg, size_t size,
+              std::function<void(bool)> op_completed_func = nullptr) {
       if (event_poll_->is_in_poll_thread()) {
         _send_in_poll_thread(msg, size, std::move(op_completed_func));
       } else {
@@ -172,11 +181,13 @@ namespace cxpnet {
       _set_state(State::kDisconnected);
       channel_->clear_event();
       channel_->remove();
+
       if (on_close_func_ != nullptr) {
         std::shared_ptr<Conn> shared_this = shared_from_this();
         on_close_func_(shared_this, err);
       }
     }
+
     // TODO: 简化一下，缩减为一个函数，去掉重载
     bool _send_in_poll_thread(const char* data, size_t size, std::function<void(bool)> op_completed_func) {
       int op_completed = _send_in_poll_thread(data, size);
@@ -224,11 +235,6 @@ namespace cxpnet {
 
     void  _set_state(State e) { state_.store(static_cast<int>(e), std::memory_order_release); }
     State _state() { return static_cast<State>(state_.load(std::memory_order_acquire)); }
-
-    void _set_callback(OnMessageCallback message_func, OnCloseCallback close_func) {
-      on_message_func_ = message_func;
-      on_close_func_   = close_func;
-    }
   private:
     int                           handle_     = -1;
     IOEventPoll*                  event_poll_ = nullptr;

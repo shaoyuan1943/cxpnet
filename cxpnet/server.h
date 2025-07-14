@@ -2,6 +2,7 @@
 #define SERVER_H
 
 #include "acceptor.h"
+#include "conn.h"
 #include "io_base.h"
 #include "io_event_poll.h"
 #include "poll_thread_pool.h"
@@ -10,7 +11,8 @@ namespace cxpnet {
   class Server {
   public:
     Server(const char* addr, uint16_t port,
-           ProtocolStack proto_stack = ProtocolStack::kIPv4Only, int option = SocketOption::kNone) {
+           ProtocolStack proto_stack = ProtocolStack::kIPv4Only,
+           int           option      = SocketOption::kNone) {
       started_    = false;
       thread_num_ = 0;
       main_poll_  = std::make_unique<IOEventPoll>();
@@ -19,6 +21,21 @@ namespace cxpnet {
                                                    std::placeholders::_1, std::placeholders::_2));
     }
     ~Server() {}
+    void shutdown() {
+      if (acceptor_) {
+        acceptor_->shutdown();
+      }
+
+      if(poll_thread_pool_) {
+        poll_thread_pool_->shutdown();
+      }
+
+      if (main_poll_) {
+        main_poll_->shutdown();
+      }
+
+      started_ = false;
+    }
 
     void set_thread_num(int n) { thread_num_ = n; }
     void set_conn_callback(OnConnCallback conn_func) { on_conn_func_ = conn_func; }
@@ -86,6 +103,7 @@ namespace cxpnet {
       }
 
       auto conn = std::make_shared<Conn>(event_poll, handle);
+      conn->set_remote_addr(client_ip_str, client_port);
       if (on_conn_func_ != nullptr) {
         on_conn_func_(conn);
       }
