@@ -1,7 +1,7 @@
 #ifndef CHANNEL_H
 #define CHANNEL_H
 
-#include "io_base.h"
+#include "base_type_value.h"
 #include "io_event_poll.h"
 #include "poller_for_epoll.h"
 
@@ -14,8 +14,8 @@ namespace cxpnet {
     }
     ~Channel() {}
 
-    int          state() { return state_; }
-    void         set_state(int state) { state_ = state; }
+    bool         registered_in_poller() { return registered_; }
+    void         set_registered(bool registered) { registered_ = registered; }
     int          handle() { return handle_; }
     int          events() { return events_; }
     void         set_result_events(int events) { result_events_ = events; }
@@ -93,6 +93,7 @@ namespace cxpnet {
     int                      events_        = 0;
     int                      result_events_ = 0;
     int                      state_         = 0;
+    bool                     registered_    = false;
     bool                     tied_          = false;
     std::weak_ptr<void>      tie_;
     std::function<void()>    on_read_func_  = nullptr;

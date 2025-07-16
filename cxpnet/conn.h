@@ -1,17 +1,18 @@
 #ifndef CONN_H
 #define CONN_H
 
+#include "base_type_value.h"
 #include "buffer.h"
 #include "channel.h"
-#include "io_base.h"
 #include "io_event_poll.h"
 #include "platform_api.h"
 #include <atomic>
 #include <memory>
 
 namespace cxpnet {
-  class Conn : public std::enable_shared_from_this<Conn> {
+  class Conn : public NonCopyable, std::enable_shared_from_this<Conn> {
   public:
+    using SendedCallback = std::function<void(bool)>;
     Conn(IOEventPoll* event_poll, int handle) {
       handle_       = handle;
       event_poll_   = event_poll;
@@ -61,33 +62,28 @@ namespace cxpnet {
     bool                             connected() {
       return state_.load(std::memory_order_acquire) == static_cast<int>(State::kConnected);
     }
-
-    void set_conn_user_callbacks(OnMessageCallback message_func, OnCloseCallback close_func) {
+    void set_conn_user_callbacks(OnMessageCallback message_func, OnConnCloseCallback close_func) {
       on_message_func_ = message_func;
       on_close_func_   = close_func;
     }
 
-    void send(const std::string&        msg,
-              std::function<void(bool)> op_completed_func = nullptr) {
-      send(msg.data(), msg.size(), op_completed_func);
+    void send(const std::string& msg, SendedCallback func = nullptr) {
+      send(msg.data(), msg.size(), func);
     }
-    void send(const std::string_view    msg,
-              std::function<void(bool)> op_completed_func = nullptr) {
-      send(msg.data(), msg.size(), op_completed_func);
+    void send(const std::string_view msg, SendedCallback func = nullptr) {
+      send(msg.data(), msg.size(), func);
     }
-    void send(const char* msg, size_t size,
-              std::function<void(bool)> op_completed_func = nullptr) {
+    void send(const char* msg, size_t size, SendedCallback func = nullptr) {
       if (event_poll_->is_in_poll_thread()) {
-        _send_in_poll_thread(msg, size, std::move(op_completed_func));
+        _send_in_poll_thread(msg, size, std::move(func));
       } else {
-        // TODO: Use std::shared_ptr to transmit data to poll
-        // auto copied_data = std::make_shared<std::vector<char>>(msg, msg + size);
-        event_poll_->run_in_poll([this, msg, size, completed_func = std::move(op_completed_func)]() {
-          _send_in_poll_thread(msg, size, completed_func);
+        std::shared_ptr<Conn> shared_this    = shared_from_this();
+        SendedCallback        completed_func = std::move(func);
+        event_poll_->run_in_poll([shared_this, msg, size, completed_func]() {
+          shared_this->_send_in_poll_thread(msg, size, completed_func);
         });
       }
     }
-
     // NOT thread-safe！
     // Only invoke this function in OnConnectionCallback
     void set_read_write_buffer_size(uint read_size, uint write_size) {
@@ -120,7 +116,7 @@ namespace cxpnet {
       int read_n       = -1;
       int readed_total = 0;
       while (true) {
-        if (read_buffer_->writable_size() <= 0) { read_buffer_->ensure_writable_size(max_size_per_read); }
+        if (read_buffer_->writable_size() <= 0) { read_buffer_->ensure_writable_size(1024 * 2); }
 
         read_n = ::recv(handle_, read_buffer_->take_data(), read_buffer_->writable_size(), 0);
         if (read_n > 0) {
@@ -136,7 +132,7 @@ namespace cxpnet {
 
         if (read_n == 0) {
           if (static_cast<State>(state_.load(std::memory_order_acquire)) == State::kDisconnecting) {
-            _handle_close_event(0); // User manually closed: shutdown
+            _handle_close_event(0);
             return;
           }
         }
@@ -237,20 +233,23 @@ namespace cxpnet {
     void  _set_state(State e) { state_.store(static_cast<int>(e), std::memory_order_release); }
     State _state() { return static_cast<State>(state_.load(std::memory_order_acquire)); }
   private:
-    int                           handle_     = -1;
-    IOEventPoll*                  event_poll_ = nullptr;
-    std::unique_ptr<Channel>      channel_    = nullptr;
+    int                      handle_     = -1;
+    IOEventPoll*             event_poll_ = nullptr;
+    std::unique_ptr<Channel> channel_    = nullptr;
+
+    OnMessageCallback   on_message_func_ = nullptr;
+    OnConnCloseCallback on_close_func_   = nullptr;
+
+    std::function<void(int)> watermark_func_         = nullptr;
+    uint                     high_watermark_         = 1024 * 1024;
+    uint                     low_watermark_          = 256 * 1024;
+    bool                     high_watermark_warning_ = false;
+    char                     addr_[INET6_ADDRSTRLEN] = {0};
+    uint16_t                 port_                   = 0;
+
     std::atomic<int>              state_;
-    OnMessageCallback             on_message_func_ = nullptr;
-    OnCloseCallback               on_close_func_   = nullptr;
     std::unique_ptr<SimpleBuffer> read_buffer_;
     std::unique_ptr<SimpleBuffer> write_buffer_;
-    std::function<void(int)>      watermark_func_         = nullptr;
-    uint                          high_watermark_         = 1024 * 1024;
-    uint                          low_watermark_          = 256 * 1024;
-    bool                          high_watermark_warning_ = false;
-    char                          addr_[INET6_ADDRSTRLEN] = {0};
-    uint16_t                      port_                   = 0;
   };
 } // namespace cxpnet
 

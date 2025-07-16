@@ -1,11 +1,11 @@
 #ifndef ACCEPTOR_H
 #define ACCEPTOR_H
 
-#include "io_base.h"
+#include "base_type_value.h"
 #include "io_event_poll.h"
 
 namespace cxpnet {
-  class Acceptor {
+  class Acceptor : public NonCopyable {
   public:
     Acceptor(IOEventPoll* event_poll, const char* addr, uint16_t port,
              ProtocolStack proto_stack = ProtocolStack::kIPv4Only, int option = SocketOption::kNone) {
@@ -24,6 +24,7 @@ namespace cxpnet {
         channel_->clear_event();
         channel_->remove();
       }
+      listening_ = false;
     }
 
     bool listen() {

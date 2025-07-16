@@ -39,3 +39,11 @@
 
 # debug information files
 *.dwo
+
+# cmake tmp files
+build/*
+build/*.*
+
+# vscode tmp files
+.vscode/*
+.vscode/*.*

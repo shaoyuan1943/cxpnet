@@ -1,7 +1,7 @@
 #ifndef BUFFER_H
 #define BUFFER_H
 
-#include "io_base.h"
+#include "base_type_value.h"
 
 #include <cassert>
 

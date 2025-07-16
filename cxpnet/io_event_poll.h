@@ -1,8 +1,9 @@
 #ifndef IO_POLL_H
 #define IO_POLL_H
 
+#include "base_type_value.h"
 #include "channel.h"
-#include "io_base.h"
+#include "conn.h"
 #include "platform_api.h"
 #include "poller_for_epoll.h"
 #include <atomic>
@@ -13,16 +14,8 @@
 #include <vector>
 
 namespace cxpnet {
-  class IOEventPoll;
-  using OnMessageCallback        = std::function<void(std::shared_ptr<Conn>, const char*, size_t)>;
-  using OnCloseCallback          = std::function<void(std::shared_ptr<Conn>, int)>;
-  using OnConnectionCallback     = std::function<void(std::shared_ptr<Conn>)>;
-  using OnEventPollErrorCallback = std::function<void(IOEventPoll*, int)>;
-
-  class IOEventPoll {
+  class IOEventPoll : public NonCopyable {
   public:
-    using Closure = std::function<void()>;
-
     IOEventPoll() {
       thread_id_      = std::this_thread::get_id();
       wakeup_handle_  = platform::create_event_fd();

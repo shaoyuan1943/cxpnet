@@ -1,8 +1,8 @@
 #ifndef PLATFORM_API_H
 #define PLATFORM_API_H
 
+#include "base_type_value.h"
 #include "buffer.h"
-#include "io_base.h"
 
 namespace cxpnet { namespace platform {
 #ifdef __linux__
@@ -151,7 +151,7 @@ namespace cxpnet { namespace platform {
   }
 
   int listen(sockaddr_storage addr_storage, ProtocolStack proto_stack, int option) {
-    if (addr_storage.ss_family == 0) { return -1; }
+    if (addr_storage.ss_family == 0) { return invalid_socket; }
 
     int handle = ::socket(addr_storage.ss_family, SOCK_STREAM, IPPROTO_TCP);
     if (handle == invalid_socket) { return handle; }
@@ -162,7 +162,7 @@ namespace cxpnet { namespace platform {
       if (::setsockopt(handle, IPPROTO_IPV6, IPV6_V6ONLY, &ipv6_only, sizeof(ipv6_only)) == SOCKET_ERROR) {
         if (ipv6_only == 0) {
           close_handle(handle);
-          return -1;
+          return invalid_socket;
         }
       }
     }
@@ -171,7 +171,7 @@ namespace cxpnet { namespace platform {
       int reuse_addr = 1;
       if (::setsockopt(handle, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr)) == SOCKET_ERROR) {
         close_handle(handle);
-        return -1;
+        return invalid_socket;
       }
     }
 
@@ -179,13 +179,13 @@ namespace cxpnet { namespace platform {
       int reuse_port = 1;
       if (::setsockopt(handle, SOL_SOCKET, SO_REUSEPORT, &reuse_port, sizeof(reuse_port)) == SOCKET_ERROR) {
         close_handle(handle);
-        return -1;
+        return invalid_socket;
       }
     }
 
     if (!set_non_blocking(handle)) {
       close_handle(handle);
-      return -1;
+      return invalid_socket;
     }
 
     socklen_t addr_len = 0;
@@ -194,12 +194,12 @@ namespace cxpnet { namespace platform {
 
     if (::bind(handle, reinterpret_cast<sockaddr*>(&addr_storage), addr_len) == SOCKET_ERROR) {
       close_handle(handle);
-      return -1;
+      return invalid_socket;
     }
 
     if (::listen(handle, SOMAXCONN) == SOCKET_ERROR) {
       close_handle(handle);
-      return -1;
+      return invalid_socket;
     }
 
     return handle;

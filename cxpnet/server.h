@@ -2,17 +2,16 @@
 #define SERVER_H
 
 #include "acceptor.h"
+#include "base_type_value.h"
 #include "conn.h"
-#include "io_base.h"
 #include "io_event_poll.h"
 #include "poll_thread_pool.h"
 
 namespace cxpnet {
-  class Server {
+  class Server : public NonCopyable {
   public:
     Server(const char* addr, uint16_t port,
-           ProtocolStack proto_stack = ProtocolStack::kIPv4Only,
-           int           option      = SocketOption::kNone) {
+           ProtocolStack proto_stack = ProtocolStack::kIPv4Only, int option = SocketOption::kNone) {
       started_    = false;
       thread_num_ = 0;
       main_poll_  = std::make_unique<IOEventPoll>();
@@ -24,6 +23,9 @@ namespace cxpnet {
       main_poll_->set_error_callback(std::bind(&Server::_on_poll_error, this,
                                                std::placeholders::_1, std::placeholders::_2));
     }
+    Server(const Server&)            = delete;
+    Server& operator=(const Server&) = delete;
+    
     ~Server() {}
     void shutdown() {
       if (acceptor_) {
@@ -42,11 +44,11 @@ namespace cxpnet {
     }
 
     void set_thread_num(int n) { thread_num_ = n; }
-    void set_conn_user_callback(OnConnCallback conn_func) {
+    void set_conn_user_callback(OnConnectionCallback conn_func) {
       on_conn_func_ = std::move(conn_func);
     }
-    void set_poll_err_user_callback(OnEventPollErrorCallback err_func) {
-      on_poll_err_func_ = std::move(err_func);
+    void set_poll_error_user_callback(OnEventPollErrorCallback err_func) {
+      on_poll_error_func_ = std::move(err_func);
     }
     void start(RunningMode mode) {
       if (thread_num_ <= 0 || started_) { return; }
@@ -86,8 +88,8 @@ namespace cxpnet {
   private:
     void _on_acceptor_error(int err) {}
     void _on_poll_error(IOEventPoll* event_poll, int err) {
-      if (on_poll_err_func_ != nullptr) {
-        on_poll_err_func_(event_poll, err);
+      if (on_poll_error_func_ != nullptr) {
+        on_poll_error_func_(event_poll, err);
       }
     }
     void _on_new_connection(int handle, struct sockaddr_storage addr_storage) {
@@ -132,13 +134,13 @@ namespace cxpnet {
     std::vector<std::unique_ptr<IOEventPoll>>      sub_polls_;
     std::unique_ptr<Acceptor>                      acceptor_;
     std::unique_ptr<std::thread>                   acceptor_thread_;
-    int                                            thread_num_   = 0;
-    OnConnCallback                                 on_conn_func_ = nullptr;
-    bool                                           started_      = false;
+    int                                            thread_num_         = 0;
+    OnConnectionCallback                           on_conn_func_       = nullptr;
+    OnEventPollErrorCallback                       on_poll_error_func_ = nullptr;
+    bool                                           started_            = false;
     std::unique_ptr<PollThreadPool>                poll_thread_pool_;
     RunningMode                                    running_mode_;
     std::unordered_map<int, std::shared_ptr<Conn>> conns_;
-    OnEventPollErrorCallback                       on_poll_err_func_ = nullptr;
   };
 } // namespace cxpnet
 
