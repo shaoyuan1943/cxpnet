@@ -44,7 +44,10 @@ namespace cxpnet {
     void   append(const char* data, size_t len) {
       ensure_writable_size(len);
       std::memcpy(begin_write(), data, len);
+      write_index_ += len;
     }
+    void append(std::string& data) { append(data.data(), data.size()); }
+    void append(std::string_view data) { append(data.data(), data.size()); };
 
     void ensure_writable_size(size_t len) {
       size_t head_size = read_index_;

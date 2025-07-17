@@ -47,3 +47,11 @@ build/*.*
 # vscode tmp files
 .vscode/*
 .vscode/*.*
+
+**/CMakeCache.txt
+**/CMakeFiles/
+**/cmake_install.cmake
+**/CTestTestfile.cmake
+**/Makefile
+**/*.make
+**/cmake_generated.cmake
