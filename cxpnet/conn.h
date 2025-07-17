@@ -4,32 +4,26 @@
 #include "base_type_value.h"
 #include "buffer.h"
 #include "channel.h"
+#include "connector.h"
 #include "io_event_poll.h"
 #include "platform_api.h"
+#include "server.h"
 #include <atomic>
 #include <memory>
 
 namespace cxpnet {
-  class Conn : public NonCopyable, std::enable_shared_from_this<Conn> {
+  class Conn : public NonCopyable
+      , public std::enable_shared_from_this<Conn> {
   public:
     using SendedCallback = std::function<void(bool)>;
     Conn(IOEventPoll* event_poll, int handle) {
-      handle_       = handle;
-      event_poll_   = event_poll;
-      read_buffer_  = std::make_unique<SimpleBuffer>();
-      write_buffer_ = std::make_unique<SimpleBuffer>();
-      channel_      = std::make_unique<Channel>(event_poll, handle);
-      channel_->set_read_callback(std::bind(&Conn::_handle_read_event, shared_from_this()));
-      channel_->set_write_callback(std::bind(&Conn::_handle_write_event, shared_from_this()));
-      channel_->set_close_callback(std::bind(&Conn::_handle_close_event, shared_from_this(), std::placeholders::_1));
-      channel_->add_read_event();
-      channel_->tie(shared_from_this());
-      state_.store(static_cast<int>(State::kConnected), std::memory_order_release);
+      handle_     = handle;
+      event_poll_ = event_poll;
     }
-
     ~Conn() {
       platform::close_handle(handle_);
     }
+
     // graceful
     void shutdown() {
       if (!connected()) { return; }
@@ -88,8 +82,8 @@ namespace cxpnet {
     // Only invoke this function in OnConnectionCallback
     void set_read_write_buffer_size(uint read_size, uint write_size) {
       if (read_size != 0 && write_size != 0) {
-        read_buffer_.reset(new SimpleBuffer(read_size));
-        write_buffer_.reset(new SimpleBuffer(write_size));
+        read_buffer_.reset(new Buffer(read_size));
+        write_buffer_.reset(new Buffer(write_size));
       }
     }
     // NOT thread-safe！
@@ -107,10 +101,23 @@ namespace cxpnet {
       if (watermark_func_ != nullptr) { watermark_func_ = std::move(watermark_func); }
     }
   private:
-    friend class IOEventPoll;
-    // clang-format off
-    enum class State { kDisconnected, kConnecting, kConnected, kDisconnecting };
-    // clang-format on
+    friend class cxpnet::IOEventPoll;
+    friend class cxpnet::Server;
+    friend class cxpnet::Connector;
+
+    void _start() {
+      if (connected()) { return; }
+
+      read_buffer_  = std::make_unique<Buffer>();
+      write_buffer_ = std::make_unique<Buffer>();
+      channel_      = std::make_unique<Channel>(event_poll_, handle_);
+      channel_->set_read_callback(std::bind(&Conn::_handle_read_event, shared_from_this()));
+      channel_->set_write_callback(std::bind(&Conn::_handle_write_event, shared_from_this()));
+      channel_->set_close_callback(std::bind(&Conn::_handle_close_event, shared_from_this(), std::placeholders::_1));
+      channel_->add_read_event();
+      channel_->tie(shared_from_this());
+      state_.store(static_cast<int>(State::kConnected), std::memory_order_release);
+    }
 
     void _handle_read_event() {
       int read_n       = -1;
@@ -118,12 +125,12 @@ namespace cxpnet {
       while (true) {
         if (read_buffer_->writable_size() <= 0) { read_buffer_->ensure_writable_size(1024 * 2); }
 
-        read_n = ::recv(handle_, read_buffer_->take_data(), read_buffer_->writable_size(), 0);
+        read_n = ::recv(handle_, read_buffer_->begin_write(), read_buffer_->writable_size(), 0);
         if (read_n > 0) {
           readed_total += read_n;
-          read_buffer_->add_written_size_from_external(read_n);
+          read_buffer_->been_written(read_n);
           if (on_message_func_ != nullptr) {
-            on_message_func_(shared_from_this(), read_buffer_->take_data(), read_buffer_->writable_size());
+            on_message_func_(shared_from_this(), read_buffer_->peek(), read_buffer_->readable_size());
           }
 
           read_buffer_->clear();
@@ -146,20 +153,20 @@ namespace cxpnet {
       }
     }
     void _handle_write_event() {
-      size_t size   = write_buffer_->written_size_from_seek();
-      int    send_n = ::send(handle_, write_buffer_->take_data_from_seek(), size, 0);
+      size_t size   = write_buffer_->readable_size();
+      int    send_n = ::send(handle_, write_buffer_->peek(), size, 0);
       if (send_n > 0) {
-        write_buffer_->seek(send_n);
+        write_buffer_->been_readed(send_n);
 
         // high watermark warning
         if (high_watermark_warning_) {
-          if (write_buffer_->written_size_from_seek() <= low_watermark_) {
+          if (write_buffer_->readable_size() <= low_watermark_) {
             if (watermark_func_ != nullptr) { watermark_func_(low_watermark_); }
             high_watermark_warning_ = false;
           }
         }
 
-        if (write_buffer_->written_size_from_seek() == 0) {
+        if (write_buffer_->readable_size() == 0) {
           write_buffer_->clear();
           channel_->remove_write_event();
           if (static_cast<State>(state_.load(std::memory_order_acquire)) == State::kDisconnecting) {
@@ -175,7 +182,11 @@ namespace cxpnet {
       }
     }
     void _handle_close_event(int err) {
-      _set_state(State::kDisconnected);
+      int expected_state = static_cast<int>(State::kConnected);
+      if (!state_.compare_exchange_strong(expected_state, static_cast<int>(State::kDisconnecting))) {
+        return;
+      }
+
       channel_->clear_event();
       channel_->remove();
 
@@ -183,63 +194,63 @@ namespace cxpnet {
         std::shared_ptr<Conn> shared_this = shared_from_this();
         on_close_func_(shared_this, err);
       }
+
+      if (on_close_holder_func_ != nullptr) {
+        on_close_holder_func_();
+      }
+
+      _set_state(State::kDisconnected);
     }
 
-    // TODO: 简化一下，缩减为一个函数，去掉重载
-    bool _send_in_poll_thread(const char* data, size_t size, std::function<void(bool)> op_completed_func) {
-      int op_completed = _send_in_poll_thread(data, size);
-      if (op_completed_func != nullptr) { op_completed_func(op_completed); }
-      return op_completed;
-    }
-    bool _send_in_poll_thread(const char* data, size_t size) {
-      if (!connected() || size <= 0) { return false; }
+    void _send_in_poll_thread(const char* data, size_t size, std::function<void(bool)> func) {
+      if (!connected() || size <= 0) {
+        func(false);
+        return;
+      }
 
-      bool wait_next_poll = false;
-      if (write_buffer_->written_size_from_seek() > 0) { // wait next poll
-        write_buffer_->write(data, size);
-        wait_next_poll = true;
+      if (write_buffer_->readable_size() > 0) { // wait next poll
+        write_buffer_->append(data, size);
       } else {
         int send_n = ::send(handle_, data, size, 0);
         if (send_n > 0) {
           if (size - send_n > 0) { // wait next poll
-            write_buffer_->write(data + send_n, size - send_n);
+            write_buffer_->append(data + send_n, size - send_n);
             channel_->add_write_event();
-            wait_next_poll = true;
           }
         }
 
         if (send_n == -1) {
           int err = platform::get_last_error();
           if (err == EAGAIN || err == EWOULDBLOCK || err == EINTR) { // wait next poll
-            write_buffer_->write(data, size);
+            write_buffer_->append(data, size);
             channel_->add_write_event();
-            wait_next_poll = true;
           } else {
+            func(false);
             _handle_close_event(err);
+            return;
           }
         }
       }
 
-      if (wait_next_poll) {
-        if (write_buffer_->written_size_from_seek() > high_watermark_) {
-          if (watermark_func_ != nullptr) { watermark_func_(high_watermark_); }
-          high_watermark_warning_ = true;
-        }
+      if (write_buffer_->readable_size() > high_watermark_) {
+        if (watermark_func_ != nullptr) { watermark_func_(high_watermark_); }
+        high_watermark_warning_ = true;
       }
 
-      return wait_next_poll;
+      func(true);
     }
 
     void  _set_state(State e) { state_.store(static_cast<int>(e), std::memory_order_release); }
     State _state() { return static_cast<State>(state_.load(std::memory_order_acquire)); }
+    void  _set_on_close_holder_func(Closure holder_func) { on_close_holder_func_ = std::move(holder_func); }
   private:
     int                      handle_     = -1;
     IOEventPoll*             event_poll_ = nullptr;
     std::unique_ptr<Channel> channel_    = nullptr;
 
-    OnMessageCallback   on_message_func_ = nullptr;
-    OnConnCloseCallback on_close_func_   = nullptr;
-
+    OnMessageCallback        on_message_func_        = nullptr;
+    OnConnCloseCallback      on_close_func_          = nullptr;
+    Closure                  on_close_holder_func_   = nullptr;
     std::function<void(int)> watermark_func_         = nullptr;
     uint                     high_watermark_         = 1024 * 1024;
     uint                     low_watermark_          = 256 * 1024;
@@ -247,9 +258,9 @@ namespace cxpnet {
     char                     addr_[INET6_ADDRSTRLEN] = {0};
     uint16_t                 port_                   = 0;
 
-    std::atomic<int>              state_;
-    std::unique_ptr<SimpleBuffer> read_buffer_;
-    std::unique_ptr<SimpleBuffer> write_buffer_;
+    std::atomic<int>        state_;
+    std::unique_ptr<Buffer> read_buffer_;
+    std::unique_ptr<Buffer> write_buffer_;
   };
 } // namespace cxpnet
 

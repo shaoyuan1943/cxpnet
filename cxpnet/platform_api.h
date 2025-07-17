@@ -228,7 +228,7 @@ namespace cxpnet { namespace platform {
     return 0;
   }
 
-  int connect(sockaddr_storage addr_storage) {
+  int connect(sockaddr_storage addr_storage, bool async = true) {
     if (addr_storage.ss_family == 0) { return -1; }
 
     int handle = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -245,27 +245,29 @@ namespace cxpnet { namespace platform {
 
     // EINPROGRESS is mean of async operation is in progress, ignore this error code
     int result = ::connect(handle, reinterpret_cast<sockaddr*>(&addr_storage), addr_len);
-    if (result == SOCKET_ERROR) {
-      if (get_last_error() != EINPROGRESS) {
-        close_handle(handle);
-        return -1;
-      }
+    if (result == 0) { return handle; }
+
+    if (get_last_error() != EINPROGRESS) {
+      close_handle(handle);
+      return invalid_socket;
     }
 
-    if (result == SOCKET_ERROR && get_last_error() == EINPROGRESS) {
-      fd_set write_set;
-      FD_ZERO(&write_set);
-      FD_SET(handle, &write_set);
+    if (!async) {
+      if (result == SOCKET_ERROR && get_last_error() == EINPROGRESS) {
+        fd_set write_set;
+        FD_ZERO(&write_set);
+        FD_SET(handle, &write_set);
 
-      timeval timeout {5, 0};
-      // use select to ensure connect operation succeed
-      result = ::select((int)(handle + 1), nullptr, &write_set, nullptr, &timeout);
-      if (result != 1) {
-        close_handle(handle);
-        return -1;
+        timeval timeout {5, 0};
+        // use select to ensure connect operation succeed
+        result = ::select((int)(handle + 1), nullptr, &write_set, nullptr, &timeout);
+        if (result != 1) {
+          close_handle(handle);
+          return -1;
+        }
       }
     }
-
+    
     return handle;
   }
 }} // namespace cxpnet::platform

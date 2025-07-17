@@ -18,6 +18,7 @@ namespace cxpnet {
   public:
     IOEventPoll() {
       thread_id_      = std::this_thread::get_id();
+      poller_ = std::make_unique<Poller>(this);
       wakeup_handle_  = platform::create_event_fd();
       wakeup_channel_ = std::make_unique<Channel>(this, wakeup_handle_);
       wakeup_channel_->set_read_callback(std::bind(&IOEventPoll::_handle_wakeup, this));

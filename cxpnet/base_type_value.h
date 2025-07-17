@@ -58,6 +58,7 @@ namespace cxpnet {
 #endif // _WIN32
   class IOEventPoll;
   class Conn;
+  using ConnPtr = std::shared_ptr<Conn>;
   using OnMessageCallback        = std::function<void(std::shared_ptr<Conn>, const char*, size_t)>;
   using OnConnCloseCallback      = std::function<void(std::shared_ptr<Conn>, int)>;
   using OnConnectionCallback     = std::function<void(std::shared_ptr<Conn>)>;
@@ -76,6 +77,7 @@ namespace cxpnet {
   enum class ProtocolStack { kIPv4Only, kIPv6Only, kDualStack };
   enum class IPType { kInvalid, kIPv4, kIPv6 };
   enum class RunningMode { kOnePollPerThread, kAllOneThread };
+  enum class State { kDisconnected, kConnecting, kConnected, kDisconnecting };
   // clang-format on
 
   inline IPType ip_address_type(const std::string& address) {

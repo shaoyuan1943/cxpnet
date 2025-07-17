@@ -1,6 +1,7 @@
 #ifndef SERVER_H
 #define SERVER_H
 
+#include "ensure.h"
 #include "acceptor.h"
 #include "base_type_value.h"
 #include "conn.h"
@@ -86,6 +87,13 @@ namespace cxpnet {
       main_poll_->poll();
     }
   private:
+    void _remove_conn(int handle) {
+      ENSURE(true, "remove conn: {}", handle);
+      main_poll_->run_in_poll([this, handle]() {
+        ENSURE(conns_.find(handle) != conns_.end(), "{} not in conns_", handle);
+        conns_.erase(handle);
+      });
+    }
     void _on_acceptor_error(int err) {}
     void _on_poll_error(IOEventPoll* event_poll, int err) {
       if (on_poll_error_func_ != nullptr) {
@@ -127,7 +135,12 @@ namespace cxpnet {
         on_conn_func_(conn);
       }
 
+      conn->_set_on_close_holder_func([this, handle](){
+        _remove_conn(handle);
+      });
+
       conns_[handle] = conn;
+      conn->_start();
     }
   private:
     std::unique_ptr<IOEventPoll>                   main_poll_;

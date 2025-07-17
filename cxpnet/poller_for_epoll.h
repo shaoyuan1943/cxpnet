@@ -49,12 +49,16 @@ namespace cxpnet {
       if (registered) {
         if (channel->is_none_event()) {
           op = EPOLL_CTL_DEL;
+          channels_.erase(handle);
         } else {
           op = EPOLL_CTL_MOD;
         }
       }
 
-      if (op == EPOLL_CTL_ADD) { channel->set_registered(true); }
+      if (op == EPOLL_CTL_ADD) { 
+        channels_[handle] = channel;
+        channel->set_registered(true); 
+      }
       ENSURE(op != 0, "EPOLL_CTL failed");
 
       update(op, channel);
@@ -66,7 +70,6 @@ namespace cxpnet {
       ENSURE(channels_[handle] == channel, "Duplicate channel");
       ENSURE(channel->is_none_event(), "Must invoke 'clear_event' first");
 
-      channels_.erase(handle);
       channel->set_registered(false);
     }
 
