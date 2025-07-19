@@ -70,6 +70,7 @@ namespace cxpnet {
       ENSURE(channels_[handle] == channel, "Duplicate channel");
       ENSURE(channel->is_none_event(), "Must invoke 'clear_event' first");
 
+      channels_.erase(handle);
       channel->set_registered(false);
     }
 

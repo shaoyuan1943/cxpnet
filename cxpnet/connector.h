@@ -15,7 +15,7 @@ namespace cxpnet {
   class Connector : public NonCopyable
       , public std::enable_shared_from_this<Connector> {
   public:
-    Connector(IOEventPoll* event_poll, const char* addr, uint16_t port) {
+    Connector(IOEventPoll* event_poll, std::string_view addr, uint16_t port) {
       event_poll_ = event_poll;
       addr_       = std::string(addr);
       port_       = port;

@@ -56,13 +56,15 @@ namespace cxpnet {
 
       running_mode_ = mode;
       if (running_mode_ == RunningMode::kOnePollPerThread) {
+        sub_polls_.reserve(thread_num_);
         std::vector<IOEventPoll*> polls;
+        polls.reserve(thread_num_);
         for (auto i = 0; i < thread_num_; i++) {
           auto poll = std::make_unique<IOEventPoll>();
           poll->set_error_callback(std::bind(&Server::_on_poll_error, this,
                                              std::placeholders::_1, std::placeholders::_2));
-          sub_polls_.push_back(poll);
-          polls.push_back(sub_polls_[i].get());
+          polls.push_back(poll.get());
+          sub_polls_.push_back(std::move(poll));
         }
 
         poll_thread_pool_ = std::make_unique<PollThreadPool>(polls);

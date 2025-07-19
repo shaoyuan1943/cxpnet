@@ -26,7 +26,6 @@ namespace cxpnet {
       }
       listening_ = false;
     }
-
     bool listen() {
       if (local_addr_storage_.ss_family == 0) { return false; }
       listen_handle_ = platform::listen(local_addr_storage_, proto_stack_, sock_option_);
@@ -39,9 +38,7 @@ namespace cxpnet {
 
       return listening_;
     }
-
     bool is_listen() { return listening_; }
-
     void set_connection_callback(std::function<void(int, struct sockaddr_storage)> conn_func) { on_conn_func_ = std::move(conn_func); }
     void set_acceptor_err_callback(std::function<void(int)> err_func) { on_err_func_ = std::move(err_func); }
   private:

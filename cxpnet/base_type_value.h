@@ -25,8 +25,6 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <string.h>
-
-#define _GNU_SOURCE // for accept4
 #include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -58,8 +56,9 @@ namespace cxpnet {
 #endif // _WIN32
   class IOEventPoll;
   class Conn;
+  class Buffer;
   using ConnPtr = std::shared_ptr<Conn>;
-  using OnMessageCallback        = std::function<void(std::shared_ptr<Conn>, const char*, size_t)>;
+  using OnMessageCallback        = std::function<void(std::shared_ptr<Conn>, Buffer*)>;
   using OnConnCloseCallback      = std::function<void(std::shared_ptr<Conn>, int)>;
   using OnConnectionCallback     = std::function<void(std::shared_ptr<Conn>)>;
   using OnEventPollErrorCallback = std::function<void(IOEventPoll*, int)>;

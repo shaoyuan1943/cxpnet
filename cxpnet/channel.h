@@ -16,7 +16,7 @@ namespace cxpnet {
 
     bool         registered_in_poller() { return registered_; }
     void         set_registered(bool registered) { registered_ = registered; }
-    int          handle() { return handle_; }
+    int          handle() const { return handle_; }
     int          events() { return events_; }
     void         set_result_events(int events) { result_events_ = events; }
     bool         reading() { return events_ & platform::events::kRead; }

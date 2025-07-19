@@ -52,7 +52,7 @@ namespace cxpnet {
       port_ = port;
     }
     std::pair<const char*, uint16_t> remote_addr_and_port() { return std::make_pair(addr_, port_); }
-    int                              native_handle() { return handle_; }
+    int                              native_handle() const { return handle_; }
     bool                             connected() {
       return state_.load(std::memory_order_acquire) == static_cast<int>(State::kConnected);
     }
@@ -130,7 +130,7 @@ namespace cxpnet {
           readed_total += read_n;
           read_buffer_->been_written(read_n);
           if (on_message_func_ != nullptr) {
-            on_message_func_(shared_from_this(), read_buffer_->peek(), read_buffer_->readable_size());
+            on_message_func_(shared_from_this(), read_buffer_.get());
           }
 
           read_buffer_->clear();

@@ -2,6 +2,7 @@
 #define BUFFER_H
 
 #include "base_type_value.h"
+#include "ensure.h"
 
 #include <cassert>
 #include <cstring>
@@ -26,6 +27,7 @@ namespace cxpnet {
       if (data_ == other.data_) { return *this; }
 
       delete[] data_;
+      data_        = other.data_;
       read_index_  = other.read_index_;
       write_index_ = other.write_index_;
       capacity_    = other.capacity_;
@@ -35,19 +37,32 @@ namespace cxpnet {
     ~Buffer() { delete[] data_; }
 
     void   clear() { read_index_ = write_index_ = 0; }
-    size_t readable_size() { return write_index_ - read_index_; }
-    size_t writable_size() { return capacity_ - write_index_; }
-    char*  peek() { return data_ + read_index_; }
-    char*  begin_write() { return data_ + write_index_; }
-    void   been_readed(size_t size) { read_index_ += size; }
-    void   been_written(size_t size) { write_index_ += size; }
-    void   append(const char* data, size_t len) {
+    size_t readable_size() const { return write_index_ - read_index_; }
+    size_t writable_size() const { return capacity_ - write_index_; }
+    // read data, at the most time, use readable_size get data length
+    char* peek() const { return data_ + read_index_; }
+    // if readed in OnMessageCallback 
+    // must invoke been_readed or retrieve tell Buffer your readed length
+    void  been_readed(size_t len) {
+      ENSURE(len <= readable_size(), "len: {} > readable_size: {}", len, readable_size());
+      read_index_ += len;
+    }
+    void retrieve(size_t len) { been_readed(len); }
+    // write data
+    char* begin_write() { return data_ + write_index_; }
+
+    void been_written(size_t len) {
+      ENSURE(len <= writable_size(), "len: {} > writable_size: {}", len, writable_size());
+      write_index_ += len;
+    }
+    void append(const std::string& data) { append(data.data(), data.size()); }
+    void append(std::string_view data) { append(data.data(), data.size()); };
+    void append(const char* data, size_t len) {
+      ENSURE(len > 0, "append size must > 0");
       ensure_writable_size(len);
       std::memcpy(begin_write(), data, len);
       write_index_ += len;
     }
-    void append(std::string& data) { append(data.data(), data.size()); }
-    void append(std::string_view data) { append(data.data(), data.size()); };
 
     void ensure_writable_size(size_t len) {
       size_t head_size = read_index_;
@@ -59,13 +74,16 @@ namespace cxpnet {
           read_index_  = 0;
           write_index_ = written_size;
         } else {
-          size_t new_capacity = capacity_ + (len - writable_size());
+          size_t written_size = readable_size();
+          size_t new_capacity = capacity_ * 2 + len;
           char*  new_buffer   = new char[new_capacity];
           std::memcpy(new_buffer, peek(), readable_size());
           delete[] data_;
 
-          data_     = new_buffer;
-          capacity_ = new_capacity;
+          data_        = new_buffer;
+          capacity_    = new_capacity;
+          read_index_  = 0;
+          write_index_ = written_size;
         }
       }
     }
