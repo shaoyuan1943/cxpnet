@@ -92,7 +92,7 @@ namespace cxpnet {
     bool                         started_    = false;
     std::unique_ptr<Channel>     channel_;
     std::function<void(ConnPtr)> on_conn_func_  = nullptr;
-    std::function<void(int)>     on_error_func_    = nullptr;
+    std::function<void(int)>     on_error_func_ = nullptr;
   };
 } // namespace cxpnet
 

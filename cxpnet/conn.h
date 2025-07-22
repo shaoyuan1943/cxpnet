@@ -61,23 +61,28 @@ namespace cxpnet {
       on_close_func_   = close_func;
     }
 
-    void send(const std::string& msg, SendedCallback func = nullptr) {
-      send(msg.data(), msg.size(), func);
-    }
-    void send(const std::string_view msg, SendedCallback func = nullptr) {
-      send(msg.data(), msg.size(), func);
-    }
-    void send(const char* msg, size_t size, SendedCallback func = nullptr) {
+    void send(const char* msg, size_t size) {
+      if (!connected() || msg == nullptr || size == 0) { return; }
+
       if (event_poll_->is_in_poll_thread()) {
-        _send_in_poll_thread(msg, size, std::move(func));
+        _send_in_poll_thread(msg, size);
       } else {
-        std::shared_ptr<Conn> shared_this    = shared_from_this();
-        SendedCallback        completed_func = std::move(func);
-        event_poll_->run_in_poll([shared_this, msg, size, completed_func]() {
-          shared_this->_send_in_poll_thread(msg, size, completed_func);
+        event_poll_->run_in_poll([self = shared_from_this(), to_send = std::string(msg)]() {
+          if (!self->llf_) {
+            self->write_buffer_->append(to_send.data(), to_send.size());
+            if (self->write_buffer_->readable_size() <= to_send.size()) {
+              self->channel_->add_write_event();
+            }
+            return;
+          }
+
+          self->_send_in_poll_thread(to_send.data(), to_send.size());
         });
       }
     }
+    void send(const Buffer& msg) { send(msg.peek(), msg.readable_size()); }
+    void send(const std::string& msg) { send(msg.data(), msg.size()); }
+    void send(std::string&& msg) { send(msg.data(), msg.size()); }
     // NOT thread-safe！
     // Only invoke this function in OnConnectionCallback
     void set_read_write_buffer_size(uint read_size, uint write_size) {
@@ -100,6 +105,9 @@ namespace cxpnet {
     void set_watermark_callback(std::function<void(int)> watermark_func) {
       if (watermark_func_ != nullptr) { watermark_func_ = std::move(watermark_func); }
     }
+    // NOT thread-safe!
+    // Only invoke this function in OnConnectionCallback
+    void set_llf(bool llf) { llf_ = llf; }
   private:
     friend class cxpnet::IOEventPoll;
     friend class cxpnet::Server;
@@ -133,7 +141,6 @@ namespace cxpnet {
             on_message_func_(shared_from_this(), read_buffer_.get());
           }
 
-          read_buffer_->clear();
           continue;
         }
 
@@ -153,32 +160,37 @@ namespace cxpnet {
       }
     }
     void _handle_write_event() {
-      size_t size   = write_buffer_->readable_size();
-      int    send_n = ::send(handle_, write_buffer_->peek(), size, 0);
-      if (send_n > 0) {
-        write_buffer_->been_readed(send_n);
+      while(write_buffer_->readable_size() > 0) {
+        size_t size = write_buffer_->readable_size();
+        int send_n = ::send(handle_, write_buffer_->peek(), size, 0);
+        if (send_n > 0) {
+          write_buffer_->been_readed(send_n);
 
-        // high watermark warning
-        if (high_watermark_warning_) {
-          if (write_buffer_->readable_size() <= low_watermark_) {
-            if (watermark_func_ != nullptr) { watermark_func_(low_watermark_); }
-            high_watermark_warning_ = false;
+          // high watermark warning
+          if (high_watermark_warning_) {
+            if (write_buffer_->readable_size() <= low_watermark_) {
+              if (watermark_func_ != nullptr) { watermark_func_(low_watermark_); }
+              high_watermark_warning_ = false;
+            }
           }
-        }
+        } else {
+          int err = platform::get_last_error();
+          if (platform::handle_error_action(err) == platform::ErrorAction::kBreak) { break; }
+          if (platform::handle_error_action(err) == platform::ErrorAction::kContinue) { continue; }
 
-        if (write_buffer_->readable_size() == 0) {
-          write_buffer_->clear();
-          channel_->remove_write_event();
-          if (static_cast<State>(state_.load(std::memory_order_acquire)) == State::kDisconnecting) {
-            platform::shut_wr(handle_);
-          }
+          _handle_close_event(err);
+          return;
         }
       }
 
-      if (send_n == -1) {
-        int err = platform::get_last_error();
-        if (err == EAGAIN || err == EWOULDBLOCK || err == EINTR) { return; } // wait for next poll
-        _handle_close_event(err);
+      // The 'shut_wr' operation may be executed repeatedly
+      // but calling 'shut_wr' again on a socket that has already been shutted is harmless
+      if (write_buffer_->readable_size() == 0) {
+        write_buffer_->clear();
+        channel_->remove_write_event();
+        if (static_cast<State>(state_.load(std::memory_order_acquire)) == State::kDisconnecting) {
+          platform::shut_wr(handle_);
+        }
       }
     }
     void _handle_close_event(int err) {
@@ -202,12 +214,7 @@ namespace cxpnet {
       _set_state(State::kDisconnected);
     }
 
-    void _send_in_poll_thread(const char* data, size_t size, std::function<void(bool)> func) {
-      if (!connected() || size <= 0) {
-        func(false);
-        return;
-      }
-
+    void _send_in_poll_thread(const char* data, size_t size) {
       if (write_buffer_->readable_size() > 0) { // wait next poll
         write_buffer_->append(data, size);
       } else {
@@ -225,7 +232,6 @@ namespace cxpnet {
             write_buffer_->append(data, size);
             channel_->add_write_event();
           } else {
-            func(false);
             _handle_close_event(err);
             return;
           }
@@ -236,8 +242,6 @@ namespace cxpnet {
         if (watermark_func_ != nullptr) { watermark_func_(high_watermark_); }
         high_watermark_warning_ = true;
       }
-
-      func(true);
     }
 
     void  _set_state(State e) { state_.store(static_cast<int>(e), std::memory_order_release); }
@@ -257,6 +261,7 @@ namespace cxpnet {
     bool                     high_watermark_warning_ = false;
     char                     addr_[INET6_ADDRSTRLEN] = {0};
     uint16_t                 port_                   = 0;
+    bool                     llf_                    = false; // last laxity first
 
     std::atomic<int>        state_;
     std::unique_ptr<Buffer> read_buffer_;

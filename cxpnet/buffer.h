@@ -40,7 +40,7 @@ namespace cxpnet {
     size_t readable_size() const { return write_index_ - read_index_; }
     size_t writable_size() const { return capacity_ - write_index_; }
     // read data, at the most time, use readable_size get data length
-    char* peek() const { return data_ + read_index_; }
+    const char* peek() const { return data_ + read_index_; }
     // if readed in OnMessageCallback 
     // must invoke been_readed or retrieve tell Buffer your readed length
     void  been_readed(size_t len) {
@@ -76,8 +76,9 @@ namespace cxpnet {
         } else {
           size_t written_size = readable_size();
           size_t new_capacity = capacity_ * 2 + len;
+          const char* pre = peek();
           char*  new_buffer   = new char[new_capacity];
-          std::memcpy(new_buffer, peek(), readable_size());
+          std::memcpy(new_buffer, pre, written_size);
           delete[] data_;
 
           data_        = new_buffer;

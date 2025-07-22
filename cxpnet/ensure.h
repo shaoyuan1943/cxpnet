@@ -17,7 +17,7 @@
                 << " | Condition failed: " << #condition                 \
                 << " | File: " << __FILE__                               \
                 << " | Line: " << __LINE__ << std::endl;                 \
-      throw std::runtime_error(formatter_type);                          \
+      throw std::runtime_error(formatted_msg);                           \
     }                                                                    \
   } while (0)
 #else

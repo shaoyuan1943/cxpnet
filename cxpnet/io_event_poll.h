@@ -33,7 +33,7 @@ namespace cxpnet {
 
     // non-blocking
     void poll() {
-      if (!shutted_.load(std::memory_order_acquire)) { return; }
+      if (shutted_.load(std::memory_order_acquire)) { return; }
       _poll(0);
     }
 
