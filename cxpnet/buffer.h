@@ -41,13 +41,13 @@ namespace cxpnet {
     size_t writable_size() const { return capacity_ - write_index_; }
     // read data, at the most time, use readable_size get data length
     const char* peek() const { return data_ + read_index_; }
-    // if readed in OnMessageCallback 
-    // must invoke been_readed or retrieve tell Buffer your readed length
-    void  been_readed(size_t len) {
+    // if read in OnMessageCallback
+    // must invoke been_read or retrieve tell Buffer your read length
+    void been_read(size_t len) {
       ENSURE(len <= readable_size(), "len: {} > readable_size: {}", len, readable_size());
       read_index_ += len;
     }
-    void retrieve(size_t len) { been_readed(len); }
+    void retrieve(size_t len) { been_read(len); }
     // write data
     char* begin_write() { return data_ + write_index_; }
 
@@ -55,7 +55,7 @@ namespace cxpnet {
       ENSURE(len <= writable_size(), "len: {} > writable_size: {}", len, writable_size());
       write_index_ += len;
     }
-    void append(const std::string& data) { append(data.data(), data.size()); }
+
     void append(std::string_view data) { append(data.data(), data.size()); };
     void append(const char* data, size_t len) {
       ENSURE(len > 0, "append size must > 0");
@@ -74,10 +74,10 @@ namespace cxpnet {
           read_index_  = 0;
           write_index_ = written_size;
         } else {
-          size_t written_size = readable_size();
-          size_t new_capacity = capacity_ * 2 + len;
-          const char* pre = peek();
-          char*  new_buffer   = new char[new_capacity];
+          size_t      written_size = readable_size();
+          size_t      new_capacity = capacity_ * 2 + len;
+          const char* pre          = peek();
+          char*       new_buffer   = new char[new_capacity];
           std::memcpy(new_buffer, pre, written_size);
           delete[] data_;
 

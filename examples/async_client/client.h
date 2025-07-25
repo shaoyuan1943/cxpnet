@@ -38,8 +38,7 @@ public:
     conn_->send(msg, size, func);
   }
 private:
-  void _on_conn_message(const ConnPtr& conn, const char* data, size_t size) {
-    conn_->send(data, size);
+  void _on_conn_message(const ConnPtr& conn, Buffer* buff) {
   }
 
   void _on_conn_close(const ConnPtr& conn, int err) {

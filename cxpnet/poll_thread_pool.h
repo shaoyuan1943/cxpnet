@@ -9,10 +9,10 @@ namespace cxpnet {
     PollThreadPool(const std::vector<IOEventPoll*>& event_polls)
         : polls_(event_polls)
         , next_(0)
-        , shutted_(false) {
+        , shut_(false) {
     }
     ~PollThreadPool() {
-      if (!shutted_) { shutdown(); }
+      if (!shut_) { shutdown(); }
     }
 
     PollThreadPool(const PollThreadPool&)            = delete;
@@ -29,7 +29,7 @@ namespace cxpnet {
       }
     }
     void shutdown() {
-      if (shutted_.exchange(true)) { return; }
+      if (shut_.exchange(true)) { return; }
 
       for (auto poll : polls_) { poll->shutdown(); }
       for (auto& t : threads_) {
@@ -47,7 +47,7 @@ namespace cxpnet {
     std::vector<IOEventPoll*>                 polls_;
     std::vector<std::unique_ptr<std::thread>> threads_;
     size_t                                    next_;
-    std::atomic<bool>                         shutted_;
+    std::atomic<bool>                         shut_;
   };
 } // namespace cxpnet
 

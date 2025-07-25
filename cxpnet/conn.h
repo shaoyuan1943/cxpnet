@@ -81,7 +81,7 @@ namespace cxpnet {
       }
     }
     void send(const Buffer& msg) { send(msg.peek(), msg.readable_size()); }
-    void send(const std::string& msg) { send(msg.data(), msg.size()); }
+    void send(std::string_view msg) { send(msg.data(), msg.size()); }
     void send(std::string&& msg) { send(msg.data(), msg.size()); }
     // NOT thread-safe！
     // Only invoke this function in OnConnectionCallback
@@ -128,14 +128,14 @@ namespace cxpnet {
     }
 
     void _handle_read_event() {
-      int read_n       = -1;
-      int readed_total = 0;
+      int read_n     = -1;
+      int read_total = 0;
       while (true) {
         if (read_buffer_->writable_size() <= 0) { read_buffer_->ensure_writable_size(1024 * 2); }
 
         read_n = ::recv(handle_, read_buffer_->begin_write(), read_buffer_->writable_size(), 0);
         if (read_n > 0) {
-          readed_total += read_n;
+          read_total += read_n;
           read_buffer_->been_written(read_n);
           if (on_message_func_ != nullptr) {
             on_message_func_(shared_from_this(), read_buffer_.get());
@@ -160,11 +160,11 @@ namespace cxpnet {
       }
     }
     void _handle_write_event() {
-      while(write_buffer_->readable_size() > 0) {
-        size_t size = write_buffer_->readable_size();
-        int send_n = ::send(handle_, write_buffer_->peek(), size, 0);
+      while (write_buffer_->readable_size() > 0) {
+        size_t size   = write_buffer_->readable_size();
+        int    send_n = ::send(handle_, write_buffer_->peek(), size, 0);
         if (send_n > 0) {
-          write_buffer_->been_readed(send_n);
+          write_buffer_->been_read(send_n);
 
           // high watermark warning
           if (high_watermark_warning_) {
@@ -183,8 +183,8 @@ namespace cxpnet {
         }
       }
 
-      // The 'shut_wr' operation may be executed repeatedly
-      // but calling 'shut_wr' again on a socket that has already been shutted is harmless
+      // The 'shut_wr' operation may be executed repeatedly,
+      // but calling 'shut_wr' again on a socket that has already been shut is harmless
       if (write_buffer_->readable_size() == 0) {
         write_buffer_->clear();
         channel_->remove_write_event();

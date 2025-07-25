@@ -1,4 +1,4 @@
-# cxpnet/examples/CMakeLists.txt
+# 更新顶层CMakeLists.txt以包含新的示例
 
 # 查找当前目录下所有的子目录
 # GLOB_RECURSE 会查找所有匹配项，但我们使用 GLOB 来只查找一层

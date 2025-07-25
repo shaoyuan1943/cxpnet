@@ -18,13 +18,13 @@ namespace cxpnet {
   public:
     IOEventPoll() {
       thread_id_      = std::this_thread::get_id();
-      poller_ = std::make_unique<Poller>(this);
+      poller_         = std::make_unique<Poller>(this);
       wakeup_handle_  = platform::create_event_fd();
       wakeup_channel_ = std::make_unique<Channel>(this, wakeup_handle_);
       wakeup_channel_->set_read_callback(std::bind(&IOEventPoll::_handle_wakeup, this));
       wakeup_channel_->add_read_event();
 
-      shutted_.store(false, std::memory_order_release);
+      shut_.store(false, std::memory_order_release);
     }
 
     ~IOEventPoll() {
@@ -33,22 +33,22 @@ namespace cxpnet {
 
     // non-blocking
     void poll() {
-      if (shutted_.load(std::memory_order_acquire)) { return; }
+      if (shut_.load(std::memory_order_acquire)) { return; }
       _poll(0);
     }
 
     // blocking
     void run() {
       thread_id_ = std::this_thread::get_id();
-      while (!shutted_.load(std::memory_order_acquire)) {
+      while (!shut_.load(std::memory_order_acquire)) {
         _poll(kPollTimeoutMS);
       }
     }
 
     void shutdown() {
-      if (shutted_.load(std::memory_order_acquire)) { return; }
-      
-      shutted_.store(true, std::memory_order_release);
+      if (shut_.load(std::memory_order_acquire)) { return; }
+
+      shut_.store(true, std::memory_order_release);
       _notify_wakeup();
     }
     void run_in_poll(Closure func) {
@@ -99,7 +99,7 @@ namespace cxpnet {
     std::mutex               mutex_;
     std::thread::id          thread_id_;
     std::vector<Channel*>    active_channels_;
-    std::atomic<bool>        shutted_;
+    std::atomic<bool>        shut_;
     OnEventPollErrorCallback on_err_func_ = nullptr;
   };
 } // namespace cxpnet
