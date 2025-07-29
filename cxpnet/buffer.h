@@ -1,7 +1,7 @@
 #ifndef BUFFER_H
 #define BUFFER_H
 
-#include "base_type_value.h"
+#include "base_types_value.h"
 #include "ensure.h"
 
 #include <cassert>
@@ -48,6 +48,7 @@ namespace cxpnet {
       read_index_ += len;
     }
     void retrieve(size_t len) { been_read(len); }
+    void retrieve_all() { retrieve(readable_size()); }
     // write data
     char* begin_write() { return data_ + write_index_; }
 

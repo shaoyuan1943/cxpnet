@@ -1,9 +1,6 @@
 #ifndef IO_DEF_H
 #define IO_DEF_H
 
-#include <functional>
-#include <memory>
-
 #ifdef _WIN32
 
 #include <MSWSock.h>
@@ -40,11 +37,19 @@
 
 #endif
 
+#include <functional>
 #include <iostream>
+#include <memory>
 #include <regex>
 #include <string>
 
 namespace cxpnet {
+  class Buffer;
+  class Channel;
+  class Conn;
+  class IOEventPoll;
+  class Poller;
+  class Connector;
 #ifdef _WIN32
   using socket_t                           = SOCKET;
   static constexpr socket_t invalid_socket = INVALID_SOCKET;
@@ -54,13 +59,11 @@ namespace cxpnet {
   static constexpr socket_t invalid_socket = -1;
   static constexpr int      SOCKET_ERROR   = -1;
 #endif // _WIN32
-  class IOEventPoll;
-  class Conn;
-  class Buffer;
-  using ConnPtr = std::shared_ptr<Conn>;
-  using OnMessageCallback        = std::function<void(std::shared_ptr<Conn>, Buffer*)>;
-  using OnConnCloseCallback      = std::function<void(std::shared_ptr<Conn>, int)>;
-  using OnConnectionCallback     = std::function<void(std::shared_ptr<Conn>)>;
+  using AddrStorage              = struct sockaddr_storage;
+  using ConnPtr                  = std::shared_ptr<Conn>;
+  using OnMessageCallback        = std::function<void(ConnPtr, Buffer*)>;
+  using OnConnCloseCallback      = std::function<void(ConnPtr, int)>;
+  using OnConnectionCallback     = std::function<void(ConnPtr)>;
   using OnEventPollErrorCallback = std::function<void(IOEventPoll*, int)>;
   using Closure                  = std::function<void()>;
 
