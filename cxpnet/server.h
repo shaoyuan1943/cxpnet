@@ -17,9 +17,6 @@ namespace cxpnet {
            ProtocolStack proto_stack = ProtocolStack::kIPv4Only, int option = SocketOption::kNone);
     ~Server();
 
-    Server(const Server&)            = delete;
-    Server& operator=(const Server&) = delete;
-
     void shutdown();
     void start(RunningMode mode);
     void run();

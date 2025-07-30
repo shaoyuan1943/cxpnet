@@ -1,8 +1,5 @@
 
-#include "cxpnet/buffer.h"
-#include "cxpnet/conn.h"
-#include "cxpnet/connector.h"
-#include "cxpnet/io_event_poll.h"
+#include "cxpnet/cxpnet.h"
 #include <iostream>
 #include <mutex>
 #include <string>

@@ -7,10 +7,11 @@
 #include "platform_api.h"
 #include "channel.h"
 #include "conn.h"
-#include "poller_for_epoll.h
+#include "poller_for_epoll.h"
 #include "io_event_poll.h"
 #include "acceptor.h"
 #include "connector.h"
+#include "poll_thread_pool.h"
 #include "server.h"
 
 #endif // CXPNET_H

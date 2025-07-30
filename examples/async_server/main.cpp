@@ -1,5 +1,4 @@
-#include "cxpnet/server.h"
-
+#include "cxpnet/cxpnet.h"
 #include <iostream>
 
 int main() {
