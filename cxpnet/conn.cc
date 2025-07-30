@@ -75,7 +75,7 @@ namespace cxpnet {
     while (true) {
       if (read_buffer_->writable_size() <= 0) { read_buffer_->ensure_writable_size(1024 * 2); }
 
-      read_n = ::recv(handle_, read_buffer_->begin_write(), read_buffer_->writable_size(), 0);
+      read_n = ::recv(handle_, read_buffer_->to_write(), read_buffer_->writable_size(), 0);
       if (read_n > 0) {
         read_total += read_n;
         read_buffer_->been_written(read_n);

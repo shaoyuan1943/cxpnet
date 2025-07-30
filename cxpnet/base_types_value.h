@@ -85,12 +85,12 @@ namespace cxpnet {
   inline IPType ip_address_type(const std::string& address) {
     if (address.empty()) { return IPType::kInvalid; }
 
-    sockaddr_in sa = {0};
+    sockaddr_in sa {};
     if (inet_pton(AF_INET, address.c_str(), &(sa.sin_addr)) == 1) {
       return IPType::kIPv4;
     }
 
-    sockaddr_in6 sa6 = {0};
+    sockaddr_in6 sa6 {};
     if (inet_pton(AF_INET6, address.c_str(), &(sa6.sin6_addr)) == 1) {
       return IPType::kIPv6;
     }

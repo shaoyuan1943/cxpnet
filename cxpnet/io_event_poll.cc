@@ -61,7 +61,7 @@ namespace cxpnet {
     int result = 0;
     int err    = 0;
     active_channels_.clear();
-    result = poller_->poll(kPollTimeoutMS, active_channels_);
+    result = poller_->poll(poll_timeout, active_channels_);
     if (result < 0) { err = Platform::get_last_error(); }
 
     for (auto&& channel : active_channels_) { channel->handle_event(); }

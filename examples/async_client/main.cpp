@@ -31,7 +31,7 @@ public:
   void _on_conn_message(const ConnPtr& conn, Buffer* buff) {
     if (buff->readable_size() > 0) {
       std::string msg(buff->peek(), buff->readable_size());
-      buff->retrieve_all();
+      buff->been_read_all();
 
       std::cout << "recv msg: " << msg << std::endl;
     }

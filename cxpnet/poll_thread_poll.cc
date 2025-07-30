@@ -12,6 +12,7 @@ namespace cxpnet {
       }));
     }
   }
+
   void PollThreadPool::shutdown() {
     if (shut_.exchange(true)) { return; }
 
@@ -20,6 +21,7 @@ namespace cxpnet {
       if (t->joinable()) { t->join(); }
     }
   }
+  
   IOEventPoll* PollThreadPool::next_poll() {
     if (polls_.empty()) { return nullptr; }
 

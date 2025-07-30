@@ -47,11 +47,9 @@ namespace cxpnet {
       ENSURE(len <= readable_size(), "len: {} > readable_size: {}", len, readable_size());
       read_index_ += len;
     }
-    void retrieve(size_t len) { been_read(len); }
-    void retrieve_all() { retrieve(readable_size()); }
+    void been_read_all() { been_read(readable_size());}
     // write data
-    char* begin_write() { return data_ + write_index_; }
-
+    char* to_write() { return data_ + write_index_; }
     void been_written(size_t len) {
       ENSURE(len <= writable_size(), "len: {} > writable_size: {}", len, writable_size());
       write_index_ += len;
@@ -61,7 +59,7 @@ namespace cxpnet {
     void append(const char* data, size_t len) {
       ENSURE(len > 0, "append size must > 0");
       ensure_writable_size(len);
-      std::memcpy(begin_write(), data, len);
+      std::memcpy(to_write(), data, len);
       write_index_ += len;
     }
 
