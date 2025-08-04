@@ -44,7 +44,7 @@ target_include_directories(cxpnet PUBLIC
 
 # 设置平台和编译器特定的编译选项
 target_compile_options(cxpnet PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra>
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -g -rdynamic>
     $<$<CXX_COMPILER_ID:MSVC>:/W4>
 )
 

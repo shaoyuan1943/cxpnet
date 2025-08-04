@@ -1,5 +1,6 @@
 #include "poll_thread_pool.h"
 #include "io_event_poll.h"
+#include "ensure.h"
 
 namespace cxpnet {
   void PollThreadPool::start() {

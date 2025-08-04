@@ -1,7 +1,20 @@
 #include "channel.h"
+#include "ensure.h"
 #include "io_event_poll.h"
 
 namespace cxpnet {
+  Channel::Channel(IOEventPoll* event_poll, int handle)
+      : event_poll_ {event_poll}
+      , handle_ {handle}
+      , events_ {0}
+      , result_events_ {0}
+      , state_ {0}
+      , registered_ {false}
+      , tied_ {false}
+      , on_read_func_ {nullptr}
+      , on_write_func_ {nullptr}
+      , on_close_func_ {nullptr} {
+  }
   void Channel::add_read_event() {
     if (reading()) { return; }
     events_ |= Platform::events::kRead;

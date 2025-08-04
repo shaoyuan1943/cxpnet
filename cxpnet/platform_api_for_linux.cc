@@ -205,13 +205,13 @@ namespace cxpnet {
   void Platform::write_to_fd(int fd) {
     uint64_t one = 1;
     ssize_t  n   = write(fd, &one, sizeof(one));
-    ENSURE(n != sizeof(one), "write to fd failed in write_fd");
+    ENSURE(n == sizeof(one), "write to fd failed in write_fd");
   }
   
   void Platform::read_from_fd(int fd) {
     uint64_t one = 1;
     ssize_t  n   = read(fd, &one, sizeof(one));
-    ENSURE(n != sizeof(one), "write to fd failed in read_fd");
+    ENSURE(n == sizeof(one), "write to fd failed in read_fd");
   }
 
   int Platform::create_event_fd() {

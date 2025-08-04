@@ -8,10 +8,7 @@ namespace cxpnet {
   class IOEventPoll;
   class Channel {
   public:
-    Channel(IOEventPoll* event_poll, int handle) {
-      event_poll_ = event_poll;
-      handle_     = handle;
-    }
+    Channel(IOEventPoll* event_poll, int handle);
     ~Channel() {}
 
     void remove();
@@ -39,17 +36,17 @@ namespace cxpnet {
     void _update();
     void _handle_event();
   private:
-    IOEventPoll*             event_poll_    = nullptr;
-    int                      handle_        = -1;
-    int                      events_        = 0;
-    int                      result_events_ = 0;
-    int                      state_         = 0;
-    bool                     registered_    = false;
-    bool                     tied_          = false;
+    IOEventPoll*             event_poll_;
+    int                      handle_;
+    int                      events_;
+    int                      result_events_;
+    int                      state_;
+    bool                     registered_;
+    bool                     tied_;
     std::weak_ptr<void>      tie_;
-    std::function<void()>    on_read_func_  = nullptr;
-    std::function<void()>    on_write_func_ = nullptr;
-    std::function<void(int)> on_close_func_ = nullptr;
+    std::function<void()>    on_read_func_;
+    std::function<void()>    on_write_func_;
+    std::function<void(int)> on_close_func_;
   };
 } // namespace cxpnet
 

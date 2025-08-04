@@ -7,18 +7,19 @@
 #include "poll_thread_pool.h"
 
 namespace cxpnet {
-  Server::Server(const char* addr, uint16_t port,
-                 ProtocolStack proto_stack, int option) {
-    started_    = false;
-    thread_num_ = 0;
-    main_poll_  = std::make_unique<IOEventPoll>();
-    acceptor_   = std::make_unique<Acceptor>(main_poll_.get(), addr, port, proto_stack, option);
-    acceptor_->set_connection_callback(std::bind(&Server::_on_new_connection, this,
-                                                 std::placeholders::_1, std::placeholders::_2));
-    acceptor_->set_acceptor_err_callback(std::bind(&Server::_on_acceptor_error, this,
-                                                   std::placeholders::_1));
-    main_poll_->set_error_callback(std::bind(&Server::_on_poll_error, this,
-                                             std::placeholders::_1, std::placeholders::_2));
+  Server::Server(const char* addr, uint16_t port, ProtocolStack proto_stack, int option) {
+    started_                = false;
+    thread_num_             = 0;
+    on_conn_func_           = nullptr;
+    on_poll_error_func_     = nullptr;
+    on_acceptor_error_func_ = nullptr;
+    main_poll_              = std::make_unique<IOEventPoll>();
+    acceptor_               = std::make_unique<Acceptor>(main_poll_.get(), addr, port, proto_stack, option);
+
+    acceptor_->set_connection_callback(std::bind(&Server::_on_new_connection, this, std::placeholders::_1, std::placeholders::_2));
+    acceptor_->set_acceptor_err_callback(std::bind(&Server::_on_acceptor_error, this, std::placeholders::_1));
+    
+    main_poll_->set_error_callback(std::bind(&Server::_on_poll_error, this, std::placeholders::_1, std::placeholders::_2));
     main_poll_->set_name("main_poll");
   }
 
@@ -42,9 +43,9 @@ namespace cxpnet {
       for (auto i = 0; i < thread_num_; i++) {
         auto poll = std::make_unique<IOEventPoll>();
         poll->set_name(std::format("sub_poll_{}", i + 1));
-        poll->set_error_callback(std::bind(&Server::_on_poll_error, this,
-                                           std::placeholders::_1, std::placeholders::_2));
+        poll->set_error_callback(std::bind(&Server::_on_poll_error, this, std::placeholders::_1, std::placeholders::_2));
         polls.push_back(poll.get());
+        
         sub_polls_.push_back(std::move(poll));
       }
 
@@ -52,6 +53,7 @@ namespace cxpnet {
       poll_thread_pool_->start();
     }
 
+    acceptor_->listen();
     started_ = true;
   }
 
@@ -70,21 +72,25 @@ namespace cxpnet {
     main_poll_->poll();
   }
 
-  void Server::_remove_conn(int handle) {
-    ENSURE(true, "remove conn: {}", handle);
+  void Server::_on_conn_close(int handle) {
     main_poll_->run_in_poll([this, handle]() {
       ENSURE(conns_.find(handle) != conns_.end(), "{} not in conns_", handle);
       conns_.erase(handle);
     });
   }
 
-  void Server::_on_acceptor_error(int err) {}
+  void Server::_on_acceptor_error(int err) {
+    if (on_acceptor_error_func_ != nullptr) {
+      on_acceptor_error_func_(err);
+    }
+  }
+
   void Server::_on_poll_error(IOEventPoll* event_poll, int err) {
     if (on_poll_error_func_ != nullptr) {
       on_poll_error_func_(event_poll, err);
     }
   }
-  
+
   void Server::_on_new_connection(int handle, struct sockaddr_storage addr_storage) {
     if (handle == invalid_socket) { return; }
     char     client_ip_str[INET6_ADDRSTRLEN] = {0};
@@ -116,16 +122,16 @@ namespace cxpnet {
 
     auto conn = std::make_shared<Conn>(event_poll, handle);
     conn->set_remote_addr(client_ip_str, client_port);
-    if (on_conn_func_ != nullptr) {
-      on_conn_func_(conn);
-    }
-
     conn->_set_on_close_holder_func([this, handle]() {
-      _remove_conn(handle);
+      _on_conn_close(handle);
     });
 
     conns_[handle] = conn;
     conn->_start();
+
+    if (on_conn_func_ != nullptr) {
+      on_conn_func_(conn);
+    }
   }
 
 } // namespace cxpnet

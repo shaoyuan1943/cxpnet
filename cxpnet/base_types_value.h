@@ -59,12 +59,12 @@ namespace cxpnet {
   static constexpr socket_t invalid_socket = -1;
   static constexpr int      SOCKET_ERROR   = -1;
 #endif // _WIN32
-  using AddrStorage              = struct sockaddr_storage;
   using ConnPtr                  = std::shared_ptr<Conn>;
   using OnMessageCallback        = std::function<void(ConnPtr, Buffer*)>;
   using OnConnCloseCallback      = std::function<void(ConnPtr, int)>;
   using OnConnectionCallback     = std::function<void(ConnPtr)>;
   using OnEventPollErrorCallback = std::function<void(IOEventPoll*, int)>;
+  using OnAcceptorErrorCallback  = std::function<void(int)>;
   using Closure                  = std::function<void()>;
 
   namespace SocketOption {

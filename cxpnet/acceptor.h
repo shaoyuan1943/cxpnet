@@ -20,16 +20,16 @@ namespace cxpnet {
   private:
     void _handle_read();
   private:
-    using HandlesListType                    = std::vector<std::pair<int, struct sockaddr_storage>>;
-    using NewConnectionCallbackType          = std::function<void(int, struct sockaddr_storage)>;
-    int                       listen_handle_ = -1;
-    IOEventPoll*              event_poll_    = nullptr;
+    using HandlesListType           = std::vector<std::pair<int, struct sockaddr_storage>>;
+    using NewConnectionCallbackType = std::function<void(int, struct sockaddr_storage)>;
+    int                       listen_handle_;
+    IOEventPoll*              event_poll_;
     std::unique_ptr<Channel>  channel_;
-    bool                      listening_    = false;
-    int                       sock_option_  = SocketOption::kNone;
-    ProtocolStack             proto_stack_  = ProtocolStack::kIPv4Only;
-    std::function<void(int)>  on_err_func_  = nullptr;
-    NewConnectionCallbackType on_conn_func_ = nullptr;
+    bool                      listening_;
+    int                       sock_option_;
+    ProtocolStack             proto_stack_;
+    std::function<void(int)>  on_err_func_;
+    NewConnectionCallbackType on_conn_func_;
     struct sockaddr_storage   local_addr_storage_;
     HandlesListType           accepted_handles_;
   };

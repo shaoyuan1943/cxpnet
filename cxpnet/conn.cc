@@ -1,14 +1,28 @@
 #include "conn.h"
-#include "platform_api.h"
 #include "channel.h"
 #include "io_event_poll.h"
+#include "platform_api.h"
 #include <atomic>
 #include <memory>
 
 namespace cxpnet {
-  Conn::Conn(IOEventPoll* event_poll, int handle) {
-    handle_     = handle;
-    event_poll_ = event_poll;
+  Conn::Conn(IOEventPoll* event_poll, int handle)
+      : event_poll_ {event_poll}
+      , handle_ {handle}
+      , channel_ {nullptr}
+      , on_message_func_ {nullptr}
+      , on_close_func_ {nullptr}
+      , on_close_holder_func_ {nullptr}
+      , watermark_func_ {nullptr}
+      , high_watermark_ {1024 * 1024}
+      , low_watermark_ {256 * 1024}
+      , high_watermark_warning_ {false}
+      , addr_ {0}
+      , port_ {0}
+      , llf_ {false}
+      , state_ {static_cast<int>(State::kDisconnecting)}
+      , read_buffer_ {nullptr}
+      , write_buffer_ {nullptr} {
   }
 
   Conn::~Conn() { Platform::close_handle(handle_); }
@@ -52,6 +66,22 @@ namespace cxpnet {
 
         self->_send_in_poll_thread(to_send.data(), to_send.size());
       });
+    }
+  }
+
+  std::string Conn::state_string() {
+    State e = _state();
+    switch (e) {
+    case State::kDisconnected:
+      return "Disconnected";
+    case State::kConnecting:
+      return "Connecting";
+    case State::kConnected:
+      return "Connected";
+    case State::kDisconnecting:
+      return "Disconnecting";
+    default:
+      return "Unknow";
     }
   }
 
@@ -136,7 +166,7 @@ namespace cxpnet {
       }
     }
   }
-  
+
   void Conn::_handle_close_event(int err) {
     int expected_state = static_cast<int>(State::kConnected);
     if (!state_.compare_exchange_strong(expected_state, static_cast<int>(State::kDisconnecting))) {
@@ -146,16 +176,15 @@ namespace cxpnet {
     channel_->clear_event();
     channel_->remove();
 
-    if (on_close_func_ != nullptr) {
-      std::shared_ptr<Conn> shared_this = shared_from_this();
-      on_close_func_(shared_this, err);
-    }
+    _set_state(State::kDisconnected);
 
     if (on_close_holder_func_ != nullptr) {
       on_close_holder_func_();
     }
 
-    _set_state(State::kDisconnected);
+    if (on_close_func_ != nullptr) {
+      on_close_func_(shared_from_this(), err);
+    }
   }
 
   void Conn::_send_in_poll_thread(const char* data, size_t size) {

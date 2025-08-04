@@ -32,7 +32,6 @@ namespace cxpnet {
     if (registered) {
       if (channel->is_none_event()) {
         op = EPOLL_CTL_DEL;
-        channels_.erase(handle);
       } else {
         op = EPOLL_CTL_MOD;
       }

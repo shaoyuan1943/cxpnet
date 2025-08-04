@@ -41,6 +41,7 @@ public:
   }
 private:
   void _on_connection(const ConnPtr& conn) {
+    LOG_DEBUG("New connection....");
     conn_ = conn;
 
     conn_->set_conn_user_callbacks(

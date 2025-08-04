@@ -39,6 +39,8 @@ namespace cxpnet {
     void send(const Buffer& msg) { send(msg.peek(), msg.readable_size()); }
     void send(std::string_view msg) { send(msg.data(), msg.size()); }
 
+    std::string state_string();
+
     // NOT thread-safe！
     // Only invoke this function in OnConnectionCallback
     void set_read_write_buffer_size(uint read_size, uint write_size) {
@@ -79,24 +81,22 @@ namespace cxpnet {
     State _state() { return static_cast<State>(state_.load(std::memory_order_acquire)); }
     void  _set_on_close_holder_func(Closure holder_func) { on_close_holder_func_ = std::move(holder_func); }
   private:
-    int                      handle_     = -1;
-    IOEventPoll*             event_poll_ = nullptr;
+    IOEventPoll*             event_poll_;
+    int                      handle_;
     std::unique_ptr<Channel> channel_;
-
-    OnMessageCallback        on_message_func_        = nullptr;
-    OnConnCloseCallback      on_close_func_          = nullptr;
-    Closure                  on_close_holder_func_   = nullptr;
-    std::function<void(int)> watermark_func_         = nullptr;
-    uint                     high_watermark_         = 1024 * 1024;
-    uint                     low_watermark_          = 256 * 1024;
-    bool                     high_watermark_warning_ = false;
-    char                     addr_[INET6_ADDRSTRLEN] = {0};
-    uint16_t                 port_                   = 0;
-    bool                     llf_                    = false; // last laxity first
-
-    std::atomic<int>        state_;
-    std::unique_ptr<Buffer> read_buffer_;
-    std::unique_ptr<Buffer> write_buffer_;
+    OnMessageCallback        on_message_func_;
+    OnConnCloseCallback      on_close_func_;
+    Closure                  on_close_holder_func_;
+    std::function<void(int)> watermark_func_;
+    uint                     high_watermark_;
+    uint                     low_watermark_;
+    bool                     high_watermark_warning_;
+    char                     addr_[INET6_ADDRSTRLEN];
+    uint16_t                 port_;
+    bool                     llf_; // last laxity first
+    std::atomic<int>         state_;
+    std::unique_ptr<Buffer>  read_buffer_;
+    std::unique_ptr<Buffer>  write_buffer_;
   };
 } // namespace cxpnet
 

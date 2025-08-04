@@ -1,20 +1,24 @@
 
 #include "connector.h"
 #include "channel.h"
-#include "ensure.h"
 #include "conn.h"
+#include "ensure.h"
 #include "io_event_poll.h"
 #include "platform_api.h"
 #include <functional>
 #include <memory>
 
 namespace cxpnet {
-  Connector::Connector(IOEventPoll* event_poll, std::string_view addr, uint16_t port) {
-    event_poll_ = event_poll;
-    addr_       = std::string(addr);
-    port_       = port;
+  Connector::Connector(IOEventPoll* event_poll, std::string_view addr, uint16_t port)
+      : event_poll_ {event_poll}
+      , addr_ {addr}
+      , port_ {port}
+      , state_ {State::kDisconnected}
+      , channel_ {nullptr}
+      , on_conn_func_ {nullptr}
+      , on_error_func_ {nullptr} {
   }
-  
+
   Connector::~Connector() {
     if (channel_) {
       channel_->clear_event();
@@ -23,9 +27,13 @@ namespace cxpnet {
   }
 
   void Connector::start() {
-    event_poll_->run_in_poll([self = shared_from_this()]() {
-      self->_start_in_poll();
-    });
+    if (event_poll_->is_in_poll_thread()) {
+      _start_in_poll();
+    } else {
+      event_poll_->run_in_poll([self = shared_from_this()]() {
+        self->_start_in_poll();
+      });
+    }
   }
 
   ConnPtr Connector::start_by_sync() {
@@ -86,7 +94,6 @@ namespace cxpnet {
         ConnPtr conn = std::make_shared<Conn>(event_poll_, handle);
         conn->set_remote_addr(addr_.c_str(), port_);
         conn->_start();
-
         if (on_conn_func_) { on_conn_func_(conn); }
       }
     }

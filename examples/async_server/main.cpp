@@ -7,7 +7,15 @@ int main() {
   server.set_thread_num(1);
   server.set_conn_user_callback([](ConnPtr conn){
     std::cout << "New Conn: " << conn->native_handle() << std::endl;
-    conn->send("hello, I'm async_server"); 
+
+    conn->set_conn_user_callbacks([](cxpnet::ConnPtr conn, cxpnet::Buffer* buff) {
+      LOG_DEBUG("msg: {}", std::string(buff->peek(), buff->readable_size()));
+      buff->been_read_all();
+    }, [](cxpnet::ConnPtr conn, int err) {
+      LOG_DEBUG("Conn closed: {}", err);
+    });
+    
+    conn->send("hello, I'm server"); 
   });
 
   server.set_poll_error_user_callback([](IOEventPoll* poll, int err){
