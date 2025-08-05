@@ -44,7 +44,7 @@ public:
 private:
     void onMessage(const ConnPtr& conn, Buffer* buffer) {
         std::string msg(buffer->peek(), buffer->readable_size());
-        buffer->retrieve(buffer->readable_size());
+        buffer->been_read_all();
         
         std::cout << "Message from " << conn->remote_addr_and_port().first 
                   << ": " << msg << std::endl;

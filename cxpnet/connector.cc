@@ -30,7 +30,7 @@ namespace cxpnet {
     if (event_poll_->is_in_poll_thread()) {
       _start_in_poll();
     } else {
-      event_poll_->run_in_poll([self = shared_from_this()]() {
+      event_poll_->run_in_poll([self = this]() {
         self->_start_in_poll();
       });
     }
@@ -77,7 +77,7 @@ namespace cxpnet {
     // EINPROGRESS or connected immediately
     _set_state(State::kConnecting);
     channel_ = std::make_unique<Channel>(event_poll_, handle);
-    channel_->set_write_callback(std::bind(&Connector::_handle_write, shared_from_this()));
+    channel_->set_write_callback(std::bind(&Connector::_handle_write, this));
     channel_->add_write_event();
   }
 

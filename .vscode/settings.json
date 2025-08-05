@@ -53,6 +53,19 @@
         "stop_token": "cpp",
         "streambuf": "cpp",
         "thread": "cpp",
-        "typeinfo": "cpp"
-    }
+        "typeinfo": "cpp",
+        "cassert": "cpp",
+        "format": "cpp",
+        "charconv": "cpp",
+        "span": "cpp",
+        "variant": "cpp",
+        "cstring": "cpp",
+        "chrono": "cpp",
+        "fstream": "cpp",
+        "iomanip": "cpp",
+        "cinttypes": "cpp"
+    },
+    "cSpell.words": [
+        "cxpnet"
+    ]
 }

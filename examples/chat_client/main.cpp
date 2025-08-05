@@ -56,7 +56,7 @@ private:
   void onMessage(const ConnPtr& conn, Buffer* buffer) {
     std::string msg(buffer->peek(), buffer->readable_size());
     std::cout << "Server: " << msg << std::endl;
-    buffer->retrieve(buffer->readable_size());
+    buffer->been_read_all();
   }
 
   void onClose(const ConnPtr& conn, int err) {
