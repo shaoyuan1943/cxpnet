@@ -41,7 +41,12 @@ namespace cxpnet {
       channels_[handle] = channel;
       channel->set_registered(true);
     }
-    ENSURE(op != 0, "EPOLL_CTL failed");
+
+    // update_channel might be called repeatedly at some times
+    // eg: local Conn and remote Conn shutdown in same time
+    if (!registered && op == 0) {
+      return;
+    }
 
     update(op, channel);
   }

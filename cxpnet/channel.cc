@@ -69,7 +69,9 @@ namespace cxpnet {
         if (on_read_func_ != nullptr) { on_read_func_(); }
       }
 
-      if (on_close_func_ != nullptr) { on_close_func_(err); }
+      if (on_close_func_ != nullptr) {
+        on_close_func_(err); 
+      }
       return;
     }
 

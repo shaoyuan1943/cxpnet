@@ -31,8 +31,8 @@ namespace cxpnet {
       return state_.load(std::memory_order_acquire) == static_cast<int>(State::kConnected);
     }
     void set_conn_user_callbacks(OnMessageCallback message_func, OnConnCloseCallback close_func) {
-      on_message_func_ = message_func;
-      on_close_func_   = close_func;
+      on_message_func_ = std::move(message_func);
+      on_close_func_   = std::move(close_func);
     }
 
     void send(const char* msg, size_t size);

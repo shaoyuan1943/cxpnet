@@ -33,7 +33,9 @@ namespace cxpnet {
 
     std::shared_ptr<Conn> shared_this = shared_from_this();
     event_poll_->run_in_poll([shared_this]() {
-      if (!shared_this->channel_->writing()) { Platform::shut_wr(shared_this->handle_); }
+      if (!shared_this->channel_->writing()) {
+        Platform::shut_wr(shared_this->handle_);
+      }
     });
   }
 
@@ -168,10 +170,12 @@ namespace cxpnet {
   }
 
   void Conn::_handle_close_event(int err) {
-    int expected_state = static_cast<int>(State::kConnected);
-    if (!state_.compare_exchange_strong(expected_state, static_cast<int>(State::kDisconnecting))) {
+    if (state_.load(std::memory_order_acquire) == static_cast<int>(State::kDisconnected)) { // be called repeatedly
       return;
     }
+
+    int expected_state = static_cast<int>(State::kConnected);
+    state_.compare_exchange_strong(expected_state, static_cast<int>(State::kDisconnecting));
 
     channel_->clear_event();
     channel_->remove();
