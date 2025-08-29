@@ -16,7 +16,6 @@ namespace cxpnet {
       epoll_fd_   = ::epoll_create1(EPOLL_CLOEXEC);
       events_.resize(kMaxPollEventCount);
     }
-
     ~Poller() { Platform::close_handle(epoll_fd_); }
 
     void shutdown();

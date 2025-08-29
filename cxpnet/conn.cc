@@ -31,11 +31,13 @@ namespace cxpnet {
     if (!connected()) { return; }
     _set_state(State::kDisconnecting);
 
-    std::shared_ptr<Conn> shared_this = shared_from_this();
-    event_poll_->run_in_poll([shared_this]() {
-      if (!shared_this->channel_->writing()) {
-        Platform::shut_wr(shared_this->handle_);
+    std::shared_ptr<Conn> self = shared_from_this();
+    event_poll_->run_in_poll([self]() {
+      if (!self->channel_->writing()) {
+        Platform::shut_wr(self->handle_);
       }
+
+      self->channel_.reset();
     });
   }
 
@@ -72,8 +74,7 @@ namespace cxpnet {
   }
 
   std::string Conn::state_string() {
-    State e = _state();
-    switch (e) {
+    switch (State e = _state()) {
     case State::kDisconnected:
       return "Disconnected";
     case State::kConnecting:
@@ -98,7 +99,7 @@ namespace cxpnet {
     channel_->set_close_callback(std::bind(&Conn::_handle_close_event, shared_from_this(), std::placeholders::_1));
     channel_->add_read_event();
     channel_->tie(shared_from_this());
-    state_.store(static_cast<int>(State::kConnected), std::memory_order_release);
+    _set_state(State::kConnected);
   }
 
   void Conn::_handle_read_event() {
@@ -112,7 +113,7 @@ namespace cxpnet {
         read_total += read_n;
         read_buffer_->been_written(read_n);
         if (on_message_func_ != nullptr) {
-          on_message_func_(shared_from_this(), read_buffer_.get());
+          on_message_func_(read_buffer_.get());
         }
 
         continue;
@@ -170,9 +171,7 @@ namespace cxpnet {
   }
 
   void Conn::_handle_close_event(int err) {
-    if (state_.load(std::memory_order_acquire) == static_cast<int>(State::kDisconnected)) { // be called repeatedly
-      return;
-    }
+    if (_state() == State::kDisconnected) { return; }
 
     int expected_state = static_cast<int>(State::kConnected);
     state_.compare_exchange_strong(expected_state, static_cast<int>(State::kDisconnecting));
@@ -187,7 +186,7 @@ namespace cxpnet {
     }
 
     if (on_close_func_ != nullptr) {
-      on_close_func_(shared_from_this(), err);
+      on_close_func_(err);
     }
   }
 

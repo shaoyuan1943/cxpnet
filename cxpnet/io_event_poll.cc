@@ -11,7 +11,8 @@
 #include <vector>
 
 namespace cxpnet {
-  IOEventPoll::IOEventPoll() {
+  IOEventPoll::IOEventPoll()
+      : on_err_func_ {nullptr} {
     thread_id_      = std::this_thread::get_id();
     poller_         = std::make_unique<Poller>(this);
     wakeup_handle_  = Platform::create_event_fd();
@@ -44,6 +45,7 @@ namespace cxpnet {
     shut_.store(true, std::memory_order_release);
     _notify_wakeup();
   }
+
   void IOEventPoll::run_in_poll(Closure func) {
     if (is_in_poll_thread()) {
       func();

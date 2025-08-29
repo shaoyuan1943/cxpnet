@@ -17,8 +17,8 @@ namespace cxpnet {
     acceptor_               = std::make_unique<Acceptor>(main_poll_.get(), addr, port, proto_stack, option);
 
     acceptor_->set_connection_callback(std::bind(&Server::_on_new_connection, this, std::placeholders::_1, std::placeholders::_2));
-    acceptor_->set_acceptor_err_callback(std::bind(&Server::_on_acceptor_error, this, std::placeholders::_1));
-    
+    acceptor_->set_acceptor_error_callback(std::bind(&Server::_on_acceptor_error, this, std::placeholders::_1));
+
     main_poll_->set_error_callback(std::bind(&Server::_on_poll_error, this, std::placeholders::_1, std::placeholders::_2));
     main_poll_->set_name("main_poll");
   }
@@ -45,7 +45,7 @@ namespace cxpnet {
         poll->set_name(std::format("sub_poll_{}", i + 1));
         poll->set_error_callback(std::bind(&Server::_on_poll_error, this, std::placeholders::_1, std::placeholders::_2));
         polls.push_back(poll.get());
-        
+
         sub_polls_.push_back(std::move(poll));
       }
 

@@ -15,8 +15,8 @@ namespace cxpnet {
     bool listen();
 
     bool is_listen() { return listening_; }
-    void set_connection_callback(std::function<void(int, struct sockaddr_storage)> conn_func) { on_conn_func_ = std::move(conn_func); }
-    void set_acceptor_err_callback(std::function<void(int)> err_func) { on_err_func_ = std::move(err_func); }
+    void set_connection_callback(std::function<void(int, struct sockaddr_storage)> func) { on_conn_func_ = std::move(func); }
+    void set_acceptor_error_callback(std::function<void(int)> func) { on_err_func_ = std::move(func); }
   private:
     void _handle_read();
   private:
@@ -30,7 +30,7 @@ namespace cxpnet {
     ProtocolStack             proto_stack_;
     std::function<void(int)>  on_err_func_;
     NewConnectionCallbackType on_conn_func_;
-    struct sockaddr_storage   local_addr_storage_;
+    sockaddr_storage          local_addr_storage_;
     HandlesListType           accepted_handles_;
   };
 } // namespace cxpnet

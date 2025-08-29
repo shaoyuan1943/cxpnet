@@ -52,9 +52,13 @@ namespace cxpnet {
     tied_ = true;
   }
 
-  void Channel::remove() { event_poll_->remove_channel(this); }
+  void Channel::remove() {
+    event_poll_->remove_channel(this);
+  }
 
-  void Channel::_update() { event_poll_->update_channel(this); }
+  void Channel::_update() {
+    event_poll_->update_channel(this);
+  }
 
   void Channel::_handle_event() {
     if (result_events_ & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
@@ -70,7 +74,7 @@ namespace cxpnet {
       }
 
       if (on_close_func_ != nullptr) {
-        on_close_func_(err); 
+        on_close_func_(err);
       }
       return;
     }

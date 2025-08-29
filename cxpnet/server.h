@@ -22,14 +22,14 @@ namespace cxpnet {
     void poll();
 
     void set_thread_num(int n) { thread_num_ = n; }
-    void set_conn_user_callback(OnConnectionCallback conn_func) {
-      on_conn_func_ = std::move(conn_func);
+    void set_conn_user_callback(std::function<void(ConnPtr)> func) {
+      on_conn_func_ = std::move(func);
     }
-    void set_poll_error_user_callback(OnEventPollErrorCallback err_func) {
-      on_poll_error_func_ = std::move(err_func);
+    void set_poll_error_user_callback(std::function<void(IOEventPoll*, int)> func) {
+      on_poll_error_func_ = std::move(func);
     }
-    void set_server_acceptor_error_user_callback(OnAcceptorErrorCallback err_func) {
-      on_acceptor_error_func_ = std::move(err_func);
+    void set_server_acceptor_error_user_callback(std::function<void(int)> func) {
+      on_acceptor_error_func_ = std::move(func);
     }
   private:
     void _on_conn_close(int handle);
@@ -42,9 +42,9 @@ namespace cxpnet {
     std::unique_ptr<Acceptor>                      acceptor_;
     std::unique_ptr<std::thread>                   acceptor_thread_;
     int                                            thread_num_;
-    OnConnectionCallback                           on_conn_func_;
-    OnEventPollErrorCallback                       on_poll_error_func_;
-    OnAcceptorErrorCallback                        on_acceptor_error_func_;
+    std::function<void(ConnPtr)>                   on_conn_func_;
+    std::function<void(IOEventPoll*, int)>         on_poll_error_func_;
+    std::function<void(int)>                       on_acceptor_error_func_;
     bool                                           started_;
     std::unique_ptr<PollThreadPool>                poll_thread_pool_;
     RunningMode                                    running_mode_;

@@ -14,7 +14,6 @@ namespace cxpnet {
   class Conn : public NonCopyable
       , public std::enable_shared_from_this<Conn> {
   public:
-    using SendedCallback = std::function<void(bool)>;
     Conn(IOEventPoll* event_poll, int handle);
     ~Conn();
 
@@ -27,10 +26,8 @@ namespace cxpnet {
     }
     std::pair<const char*, uint16_t> remote_addr_and_port() { return std::make_pair(addr_, port_); }
     int                              native_handle() const { return handle_; }
-    bool                             connected() {
-      return state_.load(std::memory_order_acquire) == static_cast<int>(State::kConnected);
-    }
-    void set_conn_user_callbacks(OnMessageCallback message_func, OnConnCloseCallback close_func) {
+    bool                             connected() { return _state() == State::kConnected; }
+    void                             set_conn_user_callbacks(std::function<void(Buffer*)> message_func, std::function<void(int)> close_func) {
       on_message_func_ = std::move(message_func);
       on_close_func_   = std::move(close_func);
     }
@@ -81,22 +78,22 @@ namespace cxpnet {
     State _state() { return static_cast<State>(state_.load(std::memory_order_acquire)); }
     void  _set_on_close_holder_func(Closure holder_func) { on_close_holder_func_ = std::move(holder_func); }
   private:
-    IOEventPoll*             event_poll_;
-    int                      handle_;
-    std::unique_ptr<Channel> channel_;
-    OnMessageCallback        on_message_func_;
-    OnConnCloseCallback      on_close_func_;
-    Closure                  on_close_holder_func_;
-    std::function<void(int)> watermark_func_;
-    uint                     high_watermark_;
-    uint                     low_watermark_;
-    bool                     high_watermark_warning_;
-    char                     addr_[INET6_ADDRSTRLEN];
-    uint16_t                 port_;
-    bool                     llf_; // last laxity first
-    std::atomic<int>         state_;
-    std::unique_ptr<Buffer>  read_buffer_;
-    std::unique_ptr<Buffer>  write_buffer_;
+    IOEventPoll*                 event_poll_;
+    int                          handle_;
+    std::unique_ptr<Channel>     channel_;
+    std::function<void(Buffer*)> on_message_func_;
+    std::function<void(int)>     on_close_func_;
+    Closure                      on_close_holder_func_;
+    std::function<void(int)>     watermark_func_;
+    uint                         high_watermark_;
+    uint                         low_watermark_;
+    bool                         high_watermark_warning_;
+    char                         addr_[INET6_ADDRSTRLEN];
+    uint16_t                     port_;
+    bool                         llf_; // last laxity first
+    std::atomic<int>             state_;
+    std::unique_ptr<Buffer>      read_buffer_;
+    std::unique_ptr<Buffer>      write_buffer_;
   };
 } // namespace cxpnet
 

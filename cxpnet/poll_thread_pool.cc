@@ -1,6 +1,6 @@
 #include "poll_thread_pool.h"
-#include "io_event_poll.h"
 #include "ensure.h"
+#include "io_event_poll.h"
 
 namespace cxpnet {
   void PollThreadPool::start() {
@@ -18,11 +18,11 @@ namespace cxpnet {
     if (shut_.exchange(true)) { return; }
 
     for (auto poll : polls_) { poll->shutdown(); }
-    for (auto& t : threads_) {
+    for (const auto& t : threads_) {
       if (t->joinable()) { t->join(); }
     }
   }
-  
+
   IOEventPoll* PollThreadPool::next_poll() {
     if (polls_.empty()) { return nullptr; }
 

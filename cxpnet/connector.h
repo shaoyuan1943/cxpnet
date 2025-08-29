@@ -17,7 +17,7 @@ namespace cxpnet {
     ConnPtr start_by_sync();
 
     void set_conn_user_callback(std::function<void(ConnPtr)> func) { on_conn_func_ = std::move(func); }
-    void set_error_user_callback(std::function<void(int)> func) { on_error_func_ = std::move(func); }
+    void set_error_callback(std::function<void(int)> func) { on_error_func_ = std::move(func); }
   private:
     void _start_in_poll();
     void _handle_write();

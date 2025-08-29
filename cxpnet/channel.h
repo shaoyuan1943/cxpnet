@@ -29,9 +29,9 @@ namespace cxpnet {
     IOEventPoll* event_poll() { return event_poll_; }
     bool         is_none_event() { return events_ == Platform::events::kNone; }
 
-    void set_read_callback(std::function<void()> read_func) { on_read_func_ = std::move(read_func); }
-    void set_write_callback(std::function<void()> write_func) { on_write_func_ = std::move(write_func); }
-    void set_close_callback(std::function<void(int)> close_func) { on_close_func_ = std::move(close_func); }
+    void set_read_callback(std::function<void()> func) { on_read_func_ = std::move(func); }
+    void set_write_callback(std::function<void()> func) { on_write_func_ = std::move(func); }
+    void set_close_callback(std::function<void(int)> func) { on_close_func_ = std::move(func); }
   private:
     void _update();
     void _handle_event();
