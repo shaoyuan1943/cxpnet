@@ -1,7 +1,7 @@
 #ifndef SERVER_H
 #define SERVER_H
 
-#include "base_types_value.h"
+#include "sock.h"
 #include <memory>
 #include <thread>
 #include <vector>

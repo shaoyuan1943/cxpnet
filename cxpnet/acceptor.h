@@ -1,7 +1,7 @@
 #ifndef ACCEPTOR_H
 #define ACCEPTOR_H
 
-#include "base_types_value.h"
+#include "sock.h"
 
 namespace cxpnet {
   class IOEventPoll;

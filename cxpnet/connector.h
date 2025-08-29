@@ -1,7 +1,7 @@
 #ifndef CONNECTOR_H
 #define CONNECTOR_H
 
-#include "base_types_value.h"
+#include "sock.h"
 #include <functional>
 #include <memory>
 

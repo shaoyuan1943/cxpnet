@@ -1,14 +1,15 @@
 #ifndef IO_POLL_H
 #define IO_POLL_H
 
-#include "base_types_value.h"
 #include "platform_api.h"
+#include "sock.h"
 #include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
+
 
 namespace cxpnet {
   class Channel;

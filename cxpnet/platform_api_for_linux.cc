@@ -1,6 +1,6 @@
-#include "platform_api.h"
-#include "base_types_value.h"
 #include "ensure.h"
+#include "platform_api.h"
+#include "sock.h"
 
 #ifdef __linux__
 namespace cxpnet {
@@ -11,7 +11,7 @@ namespace cxpnet {
     return fcntl(fd, F_SETFL, option | O_NONBLOCK) == 0;
   }
 
-  int Platform::get_last_error() { return errno;}
+  int Platform::get_last_error() { return errno; }
 
   ErrorAction Platform::handle_error_action(int err) {
     switch (err) {
@@ -207,7 +207,7 @@ namespace cxpnet {
     ssize_t  n   = write(fd, &one, sizeof(one));
     ENSURE(n == sizeof(one), "write to fd failed in write_fd");
   }
-  
+
   void Platform::read_from_fd(int fd) {
     uint64_t one = 1;
     ssize_t  n   = read(fd, &one, sizeof(one));
@@ -218,5 +218,5 @@ namespace cxpnet {
     int fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     return fd;
   }
-}
+} // namespace cxpnet
 #endif // __linux__

@@ -1,8 +1,8 @@
 #ifndef CONN_H
 #define CONN_H
 
-#include "base_types_value.h"
 #include "buffer.h"
+#include "sock.h"
 #include <atomic>
 #include <memory>
 

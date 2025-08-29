@@ -1,8 +1,8 @@
 #ifndef BUFFER_H
 #define BUFFER_H
 
-#include "base_types_value.h"
 #include "ensure.h"
+#include "sock.h"
 
 #include <cassert>
 #include <cstring>
@@ -47,10 +47,10 @@ namespace cxpnet {
       ENSURE(len <= readable_size(), "len: {} > readable_size: {}", len, readable_size());
       read_index_ += len;
     }
-    void been_read_all() { been_read(readable_size());}
+    void been_read_all() { been_read(readable_size()); }
     // write data
     char* to_write() { return data_ + write_index_; }
-    void been_written(size_t len) {
+    void  been_written(size_t len) {
       ENSURE(len <= writable_size(), "len: {} > writable_size: {}", len, writable_size());
       write_index_ += len;
     }
