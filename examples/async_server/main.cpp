@@ -1,4 +1,4 @@
-#include "cxpnet/cxpnet.h"
+#include "cxpnet.h"
 #include <iostream>
 
 int main() {
@@ -8,11 +8,11 @@ int main() {
   server.set_conn_user_callback([](ConnPtr conn){
     std::cout << "New Conn: " << conn->native_handle() << std::endl;
 
-    conn->set_conn_user_callbacks([](cxpnet::ConnPtr conn, cxpnet::Buffer* buff) {
+    conn->set_conn_user_callbacks([](cxpnet::Buffer* buff) {
       LOG_DEBUG("msg: {}", std::string(buff->peek(), buff->readable_size()));
       buff->been_read_all();
-    }, [](cxpnet::ConnPtr conn, int err) {
-      LOG_DEBUG("Conn closed: {}", err);
+    }, [](int ) {
+      LOG_DEBUG("Conn closed");
     });
     
     conn->send("hello, I'm server"); 

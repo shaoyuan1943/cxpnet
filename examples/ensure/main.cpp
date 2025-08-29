@@ -1,4 +1,4 @@
-#include "cxpnet/ensure.h"
+#include "ensure.h"
 
 #include <iostream>
 #include <string>

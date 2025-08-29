@@ -1,5 +1,5 @@
-#include "cxpnet/buffer.h"
-#include "cxpnet/ensure.h"
+#include "buffer.h"
+#include "ensure.h"
 
 #include <format>
 #include <iostream>

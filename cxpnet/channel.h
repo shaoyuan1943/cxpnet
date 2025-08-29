@@ -1,8 +1,8 @@
 #ifndef CHANNEL_H
 #define CHANNEL_H
 
-#include "base_types_value.h"
 #include "platform_api.h"
+#include "sock.h"
 
 namespace cxpnet {
   class IOEventPoll;

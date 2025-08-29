@@ -1,7 +1,7 @@
-#include "cxpnet/connector.h"
-#include "cxpnet/io_event_poll.h"
-#include "cxpnet/conn.h"
-#include "cxpnet/buffer.h"
+#include "connector.h"
+#include "io_event_poll.h"
+#include "conn.h"
+#include "buffer.h"
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -26,11 +26,11 @@ public:
             connector->set_conn_user_callback([this](const ConnPtr& conn) {
                 connected_count_++;
                 conn->set_conn_user_callbacks(
-                    [this](const ConnPtr& conn, Buffer* buffer) {
+                    [this](Buffer* buffer) {
                         message_count_++;
-                        buffer->retrieve(buffer->readable_size());
+                        buffer->been_read_all();
                     },
-                    [this](const ConnPtr& conn, int err) {
+                    [this](int ) {
                         connected_count_--;
                     }
                 );
@@ -39,7 +39,7 @@ public:
                 sendRandomMessage(conn);
             });
             
-            connector->set_error_user_callback([this](int err) {
+            connector->set_error_callback([this](int ) {
                 // Ignore errors during stress test
             });
             
@@ -88,9 +88,14 @@ private:
         conn->send(msg);
         
         // Schedule next message
-        event_poll_.run_in_poll([this, conn]() {
-            sendRandomMessage(conn);
-        }, std::chrono::milliseconds(100)); // 100ms interval
+        // Note: run_in_poll doesn't support delay, so we'll use std::thread::sleep_for in a separate thread
+        // This is a workaround for the missing functionality
+        std::thread([this, conn]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            event_poll_.run_in_poll([this, conn]() {
+                sendRandomMessage(conn);
+            });
+        }).detach();
     }
 
     void printStats() {

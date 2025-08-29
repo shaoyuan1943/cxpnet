@@ -74,7 +74,7 @@ namespace cxpnet {
   }
 
   std::string Conn::state_string() {
-    switch (State e = _state()) {
+    switch (_state()) {
     case State::kDisconnected:
       return "Disconnected";
     case State::kConnecting:

@@ -1,7 +1,7 @@
-#include "cxpnet/buffer.h"
-#include "cxpnet/conn.h"
-#include "cxpnet/connector.h"
-#include "cxpnet/io_event_poll.h"
+#include "buffer.h"
+#include "conn.h"
+#include "connector.h"
+#include "io_event_poll.h"
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -21,15 +21,15 @@ public:
 
       // Set up message and close callbacks
       conn->set_conn_user_callbacks(
-          [this](const ConnPtr& conn, Buffer* buffer) {
-            this->onMessage(conn, buffer);
+          [this](Buffer* buffer) {
+            this->onMessage(buffer);
           },
-          [this](const ConnPtr& conn, int err) {
-            this->onClose(conn, err);
+          [this](int err) {
+            this->onClose(err);
           });
     });
 
-    connector_->set_error_user_callback([this](int err) {
+    connector_->set_error_callback([this](int err) {
       std::cout << "Connection error: " << err << std::endl;
     });
   }
@@ -55,14 +55,14 @@ public:
     event_poll_.run();
   }
 private:
-  void onMessage(const ConnPtr& conn, Buffer* buffer) {
+  void onMessage(Buffer* buffer) {
     std::string response(buffer->peek(), buffer->readable_size());
     std::cout << "File server response:" << std::endl;
     std::cout << response << std::endl;
     buffer->been_read_all();
   }
 
-  void onClose(const ConnPtr& conn, int err) {
+  void onClose(int err) {
     std::cout << "File transfer connection closed with error: " << err << std::endl;
     conn_.reset();
   }

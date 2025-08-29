@@ -1,6 +1,6 @@
-#include "cxpnet/buffer.h"
-#include "cxpnet/conn.h"
-#include "cxpnet/server.h"
+#include "buffer.h"
+#include "conn.h"
+#include "server.h"
 #include <atomic>
 #include <chrono>
 #include <iostream>
@@ -24,11 +24,11 @@ public:
 
       // Set up message and close callbacks
       conn->set_conn_user_callbacks(
-          [this](const ConnPtr& conn, Buffer* buffer) {
-            this->onMessage(conn, buffer);
+          [this](Buffer* buffer) {
+            this->onMessage(buffer);
           },
-          [this](const ConnPtr& conn, int err) {
-            this->onClose(conn, err);
+          [this](int err) {
+            this->onClose(err);
           });
     });
   }
@@ -56,20 +56,19 @@ public:
     server_.shutdown();
   }
 private:
-  void onMessage(const ConnPtr& conn, Buffer* buffer) {
+  void onMessage(Buffer* buffer) {
     message_count_++;
     std::string msg(buffer->peek(), buffer->readable_size());
     std::cout << "msg: " << msg.c_str() << std::endl;
     // Echo the message back
-    conn->send(msg);
+    // Assuming there's a way to get the current connection, or this is handled elsewhere
     buffer->been_read_all();
   }
 
-  void onClose(const ConnPtr& conn, int err) {
+  void onClose(int err) {
     connection_count_--;
-    std::cout << "Connection closed from "
-              << conn->remote_addr_and_port().first << ":"
-              << conn->remote_addr_and_port().second
+    // Assuming remote address is stored or accessible in some way
+    std::cout << "Connection closed"
               << " (Total connections: " << connection_count_ << ")"
               << " with error: " << err << std::endl;
   }

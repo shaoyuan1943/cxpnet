@@ -5,15 +5,15 @@
 namespace cxpnet {
   Acceptor::Acceptor(IOEventPoll* event_poll, const char* addr, uint16_t port,
                      ProtocolStack proto_stack, int option)
-      : event_poll_ {event_poll}
-      , local_addr_storage_ {Platform::get_sockaddr(addr, port, proto_stack)}
+      : listen_handle_ {-1}
+      , event_poll_ {event_poll}
+      , channel_ {nullptr}
+      , listening_ {false}
       , sock_option_ {option}
       , proto_stack_ {proto_stack}
-      , listening_ {false}
-      , channel_ {nullptr}
-      , listen_handle_ {-1}
       , on_err_func_ {nullptr}
-      , on_conn_func_ {nullptr} {
+      , on_conn_func_ {nullptr}
+      , local_addr_storage_ {Platform::get_sockaddr(addr, port, proto_stack)} {
   }
 
   Acceptor::~Acceptor() { Platform::close_handle(listen_handle_); }

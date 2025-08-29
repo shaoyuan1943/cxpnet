@@ -1,5 +1,5 @@
 
-#include "cxpnet/cxpnet.h"
+#include "cxpnet.h"
 #include <iostream>
 #include <mutex>
 #include <string>
@@ -13,7 +13,7 @@ public:
     port_       = port;
     connector_  = std::make_unique<Connector>(poll, addr, port);
     connector_->set_conn_user_callback(std::bind(&AsyncClient::_on_connection, this, std::placeholders::_1));
-    connector_->set_error_user_callback(std::bind(&AsyncClient::_on_connector_error, this, std::placeholders::_1));
+    connector_->set_error_callback(std::bind(&AsyncClient::_on_connector_error, this, std::placeholders::_1));
   }
   ~AsyncClient() {}
 
@@ -25,7 +25,7 @@ public:
   void send(std::string_view msg) { conn_->send(std::move(msg)); }
   void send(std::string&& msg) { conn_->send(std::move(msg)); }
 
-  void _on_conn_message(const ConnPtr& conn, Buffer* buff) {
+  void _on_conn_message(Buffer* buff) {
     if (buff->readable_size() > 0) {
       std::string msg(buff->peek(), buff->readable_size());
       buff->been_read_all();
@@ -34,8 +34,8 @@ public:
     }
   }
 
-  void _on_conn_close(const ConnPtr& conn, int err) {
-    std::cout << conn->native_handle() << " closed, reason err: " << err << std::endl;
+  void _on_conn_close(int err) {
+    std::cout << "Connection closed, reason err: " << err << std::endl;
     // reconnect
     connect();
   }
@@ -45,8 +45,8 @@ private:
     conn_ = conn;
 
     conn_->set_conn_user_callbacks(
-        std::bind(&AsyncClient::_on_conn_message, this, std::placeholders::_1, std::placeholders::_2),
-        std::bind(&AsyncClient::_on_conn_close, this, std::placeholders::_1, std::placeholders::_2));
+        std::bind(&AsyncClient::_on_conn_message, this, std::placeholders::_1),
+        std::bind(&AsyncClient::_on_conn_close, this, std::placeholders::_1));
     
     conn_->send("Hello, I'm client.");
   }

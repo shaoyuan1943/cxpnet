@@ -1,7 +1,7 @@
-#include "cxpnet/buffer.h"
-#include "cxpnet/conn.h"
-#include "cxpnet/connector.h"
-#include "cxpnet/io_event_poll.h"
+#include "buffer.h"
+#include "conn.h"
+#include "connector.h"
+#include "io_event_poll.h"
 #include <atomic>
 #include <chrono>
 #include <iostream>
@@ -21,11 +21,11 @@ public:
 
       // Set up message and close callbacks
       conn->set_conn_user_callbacks(
-          [this](const ConnPtr& conn, Buffer* buffer) {
-            this->onMessage(conn, buffer);
+          [this](Buffer* buffer) {
+            this->onMessage(buffer);
           },
-          [this](const ConnPtr& conn, int err) {
-            this->onClose(conn, err);
+          [this](int err) {
+            this->onClose(err);
           });
 
       // Send HTTP GET request
@@ -39,7 +39,7 @@ public:
       conn->send(request);
     });
 
-    connector_->set_error_user_callback([this](int err) {
+    connector_->set_error_callback([this](int err) {
       std::cout << "Connection error: " << err << std::endl;
     });
   }
@@ -58,18 +58,18 @@ public:
     event_poll_.run();
   }
 private:
-  void onMessage(const ConnPtr& conn, Buffer* buffer) {
+  void onMessage(Buffer* buffer) {
     std::string response(buffer->peek(), buffer->readable_size());
     std::cout << "HTTP Response:" << std::endl;
     std::cout << response << std::endl;
     buffer->been_read_all();
 
     // Close connection after receiving response
-    conn->shutdown();
+    conn_->shutdown();
   }
 
-  void onClose(const ConnPtr& conn, int err) {
-    std::cout << "HTTP connection closed with error: " << err << std::endl;
+  void onClose(int err) {
+    std::cout << "Connection closed with error: " << err << std::endl;
     conn_.reset();
   }
 

@@ -1,41 +1,17 @@
 #ifndef IO_DEF_H
 #define IO_DEF_H
 
-#ifdef _WIN32
-
-#include <MSWSock.h>
-#include <WS2tcpip.h>
-#include <WinSock2.h>
-#include <Windows.h>
-#pragma comment(lib, "ws2_32.lib")
-#pragma comment(lib, "Mswsock.lib")
-
-#ifndef INET6_ADDRSTRLEN
-#define INET6_ADDRSTRLEN 46 // Standard IPv6 address string length
-#endif
-
-#else
-
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <string.h>
+#include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-#ifdef __APPLE__
-#include <sys/event.h>
-#endif
-
-#ifdef __linux__
-#include <sys/epoll.h>
-#endif
-
-#endif
 
 #include <functional>
 #include <iostream>
@@ -44,21 +20,12 @@
 #include <string>
 
 namespace cxpnet {
-  class Buffer;
-  class Channel;
   class Conn;
-  class IOEventPoll;
-  class Poller;
-  class Connector;
-#ifdef _WIN32
-  using socket_t                           = SOCKET;
-  static constexpr socket_t invalid_socket = INVALID_SOCKET;
-#else
   using socket_t                           = int;
   using SOCKET                             = socket_t;
   static constexpr socket_t invalid_socket = -1;
   static constexpr int      SOCKET_ERROR   = -1;
-#endif // _WIN32
+
   using ConnPtr = std::shared_ptr<Conn>;
   using Closure = std::function<void()>;
 

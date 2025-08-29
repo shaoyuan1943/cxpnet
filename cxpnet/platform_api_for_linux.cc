@@ -2,7 +2,6 @@
 #include "platform_api.h"
 #include "sock.h"
 
-#ifdef __linux__
 namespace cxpnet {
   void Platform::close_handle(int fd) { close(fd); }
 
@@ -219,4 +218,3 @@ namespace cxpnet {
     return fd;
   }
 } // namespace cxpnet
-#endif // __linux__

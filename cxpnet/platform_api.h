@@ -18,11 +18,10 @@ namespace cxpnet {
     static int              listen(sockaddr_storage addr_storage, ProtocolStack proto_stack, int option);
     static int              accept(int listen_handle, std::vector<std::pair<int, sockaddr_storage>>& accepted_handles);
     static int              connect(sockaddr_storage addr_storage, bool async = true);
-#ifdef __linux__
-    static void shut_wr(int fd);
-    static void write_to_fd(int fd);
-    static void read_from_fd(int fd);
-    static int  create_event_fd();
+    static void             shut_wr(int fd);
+    static void             write_to_fd(int fd);
+    static void             read_from_fd(int fd);
+    static int              create_event_fd();
 
     class events {
     public:
@@ -30,7 +29,6 @@ namespace cxpnet {
       static const int kRead  = EPOLLIN | EPOLLRDHUP;
       static const int kWrite = EPOLLOUT;
     };
-#endif // __linux__
   };
 } // namespace cxpnet
 

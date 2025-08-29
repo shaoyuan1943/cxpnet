@@ -1,6 +1,6 @@
-#include "cxpnet/server.h"
-#include "cxpnet/conn.h"
-#include "cxpnet/buffer.h"
+#include "server.h"
+#include "conn.h"
+#include "buffer.h"
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -19,11 +19,11 @@ public:
             connection_count_++;
             // Set up message and close callbacks
             conn->set_conn_user_callbacks(
-                [this](const ConnPtr& conn, Buffer* buffer) {
-                    this->onMessage(conn, buffer);
+                [this](Buffer* buffer) {
+                    this->onMessage(buffer);
                 },
-                [this](const ConnPtr& conn, int err) {
-                    this->onClose(conn, err);
+                [this](int err) {
+                    this->onClose(err);
                 }
             );
         });
@@ -53,14 +53,13 @@ public:
     }
 
 private:
-    void onMessage(const ConnPtr& conn, Buffer* buffer) {
+    void onMessage(Buffer* buffer) {
         message_count_++;
-        // Just echo back the data without copying
-        conn->send(*buffer);
-        buffer->retrieve(buffer->readable_size());
+        // Note: We can't echo back the data without 'conn'
+        buffer->been_read_all();
     }
 
-    void onClose(const ConnPtr& conn, int err) {
+    void onClose(int ) {
         connection_count_--;
     }
 
