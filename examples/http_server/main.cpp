@@ -1,6 +1,4 @@
-#include "buffer.h"
-#include "conn.h"
-#include "server.h"
+﻿#include "cxpnet/cxpnet.h"
 #include <atomic>
 #include <chrono>
 #include <iostream>
@@ -20,13 +18,9 @@ public:
                 << conn->remote_addr_and_port().first << ":"
                 << conn->remote_addr_and_port().second << std::endl;
 
-      // Set up message and close callbacks
       conn->set_conn_user_callbacks(
-          [this](Buffer* buffer) {
-            // Cannot call onMessage directly as it expects two parameters
-            // Need to access 'conn' somehow or redesign the callback
-            // For now, we'll just consume the buffer data
-            buffer->been_read_all();
+          [this, conn](Buffer* buffer) {
+            this->onMessage(conn, buffer);
           },
           [this](int err) {
             this->onClose(err);
@@ -35,7 +29,10 @@ public:
   }
 
   void start() {
-    server_.start(RunningMode::kOnePollPerThread);
+    if (!server_.start(RunningMode::kOnePollPerThread)) {
+      std::cout << "Failed to start HTTP server" << std::endl;
+      return;
+    }
     std::cout << "HTTP server started, listening on port 8080" << std::endl;
     server_.run();
   }

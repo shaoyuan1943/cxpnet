@@ -1,9 +1,9 @@
-#include "buffer.h"
-#include "conn.h"
-#include "server.h"
-#include <atomic>
-#include <chrono>
+﻿#include "cxpnet/cxpnet.h"
+
+#include <fstream>
 #include <iostream>
+#include <sstream>
+#include <string>
 #include <thread>
 
 using namespace cxpnet;
@@ -18,10 +18,9 @@ public:
                 << conn->remote_addr_and_port().first << ":"
                 << conn->remote_addr_and_port().second << std::endl;
 
-      // Set up message and close callbacks
       conn->set_conn_user_callbacks(
-          [this](Buffer* buffer) {
-            this->onMessage(buffer);
+          [this, conn](Buffer* buffer) {
+            this->onMessage(conn, buffer);
           },
           [this](int err) {
             this->onClose(err);
@@ -30,29 +29,43 @@ public:
   }
 
   void start() {
-    server_.start(RunningMode::kOnePollPerThread);
+    if (!server_.start(RunningMode::kOnePollPerThread)) {
+      std::cout << "Failed to start file server" << std::endl;
+      return;
+    }
+
     std::cout << "File server started, listening on port 9094" << std::endl;
     server_.run();
   }
 private:
-  void onMessage(Buffer* buffer) {
+  void onMessage(const ConnPtr& conn, Buffer* buffer) {
     std::string request(buffer->peek(), buffer->readable_size());
     buffer->been_read_all();
 
-    // Note: We can't respond to the client here because we don't have access to 'conn'
-    // This is a limitation of the new callback interface.
-    // In a real implementation, we would need to store 'conn' somewhere accessible.
-    
-    // Simple file request parsing
-    if (request.substr(0, 4) == "GET ") {
+    if (request.rfind("GET ", 0) == 0) {
       std::string filename = request.substr(4);
       filename             = filename.substr(0, filename.find_first_of("\r\n "));
-      
-      // For this example, we'll just print the request
       std::cout << "Received GET request for file: " << filename << std::endl;
-    } else {
-      std::cout << "Received unknown command: " << request << std::endl;
+
+      std::ifstream file(filename, std::ios::binary);
+      if (!file.is_open()) {
+        conn->send("ERROR: file not found\n");
+        conn->shutdown();
+        return;
+      }
+
+      std::ostringstream content;
+      content << file.rdbuf();
+
+      std::string response = "OK\n" + content.str();
+      conn->send(response);
+      conn->shutdown();
+      return;
     }
+
+    std::cout << "Received unknown command: " << request << std::endl;
+    conn->send("ERROR: unsupported command\n");
+    conn->shutdown();
   }
 
   void onClose(int err) {

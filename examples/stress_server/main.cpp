@@ -1,6 +1,4 @@
-#include "server.h"
-#include "conn.h"
-#include "buffer.h"
+﻿#include "cxpnet/cxpnet.h"
 #include <iostream>
 #include <thread>
 #include <chrono>

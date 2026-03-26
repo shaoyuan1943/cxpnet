@@ -1,4 +1,4 @@
-#include "cxpnet.h"
+﻿#include "cxpnet/cxpnet.h"
 #include <iostream>
 
 int main() {
@@ -18,8 +18,8 @@ int main() {
     conn->send("hello, I'm server"); 
   });
 
-  server.set_poll_error_user_callback([](IOEventPoll* poll, int err){
-    std::cout << "IOEventPoll poll: " << poll->name() << ", err: " << err << std::endl; 
+  server.set_error_user_callback([](int err){
+    std::cout << "Server error: " << err << std::endl; 
   });
   
   server.start(RunningMode::kOnePollPerThread);

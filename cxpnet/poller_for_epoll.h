@@ -1,39 +1,38 @@
-#ifndef POLLER_FOR_EPOLL_H
+﻿#ifndef POLLER_FOR_EPOLL_H
 #define POLLER_FOR_EPOLL_H
 
-#include "platform_api.h"
+#include "poller_base.h"
 #include "sock.h"
-#include <unordered_map>
-#include <vector>
+
+#include <sys/epoll.h>
 
 namespace cxpnet {
   class IOEventPoll;
   class Channel;
-  class Poller {
+
+  class EpollPoller : public PollerBase {
   public:
-    Poller(IOEventPoll* owner_poll) {
-      owner_poll_ = owner_poll;
-      epoll_fd_   = ::epoll_create1(EPOLL_CLOEXEC);
-      events_.resize(kMaxPollEventCount);
-    }
-    ~Poller() { Platform::close_handle(epoll_fd_); }
+    EpollPoller(IOEventPoll* owner_poll);
+    ~EpollPoller();
 
-    void shutdown();
-    int  poll(int timeout, std::vector<Channel*>& active_channels);
-    void update_channel(Channel* channel);
-    void remove_channel(Channel* channel);
+    void shutdown() override;
+    int  poll(int timeout, std::vector<Channel*>& active_channels) override;
+    void update_channel(Channel* channel) override;
+    void remove_channel(Channel* channel) override;
+  private:
     void update(int op, Channel* channel);
+    void fill_active_channels(int event_n, std::vector<Channel*>& active_channels);
 
-    bool has_channel(int handle) { return channels_.find(handle) != channels_.end(); }
-  private:
-    void _fill_active_channels(int event_n, std::vector<Channel*>& active_channels);
-  private:
-    IOEventPoll* owner_poll_ = nullptr;
-    int          epoll_fd_   = -1;
+    // 统一事件 → epoll 事件
+    int to_epoll_events(int events);
 
-    std::unordered_map<int, Channel*> channels_;
-    std::vector<struct epoll_event>   events_;
+    // epoll 事件 → 统一事件
+    int from_epoll_events(uint32_t events);
+  private:
+    int                             epoll_fd_ = -1;
+    std::vector<struct epoll_event> events_;
   };
+
 } // namespace cxpnet
 
 #endif // POLLER_FOR_EPOLL_H

@@ -1,6 +1,7 @@
-#ifndef POLL_THREAD_POOL_H
+﻿#ifndef POLL_THREAD_POOL_H
 #define POLL_THREAD_POOL_H
 
+#include <atomic>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -26,7 +27,7 @@ namespace cxpnet {
   private:
     std::vector<IOEventPoll*>                 polls_;
     std::vector<std::unique_ptr<std::thread>> threads_;
-    size_t                                    next_;
+    std::atomic<size_t>                       next_; // 改为 atomic 类型，确保线程安全
     std::atomic<bool>                         shut_;
   };
 } // namespace cxpnet

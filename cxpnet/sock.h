@@ -1,14 +1,22 @@
-#ifndef IO_DEF_H
+﻿#ifndef IO_DEF_H
 #define IO_DEF_H
 
+// 平台检测宏
+#if defined(__linux__)
+  #define CXP_PLATFORM_LINUX 1
+#elif defined(__APPLE__)
+  #define CXP_PLATFORM_MACOS 1
+#else
+  #error "Unsupported platform: cxpnet only supports Linux and macOS"
+#endif
+
+// 平台无关头文件
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <string.h>
-#include <sys/epoll.h>
-#include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -43,7 +51,7 @@ namespace cxpnet {
   enum class RunningMode { kOnePollPerThread, kAllOneThread };
   enum class State { kDisconnected, kConnecting, kConnected, kDisconnecting };
   // clang-format on
-
+ 
   inline IPType ip_address_type(const std::string& address) {
     if (address.empty()) { return IPType::kInvalid; }
 

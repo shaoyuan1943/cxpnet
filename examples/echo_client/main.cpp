@@ -1,9 +1,6 @@
-#include "buffer.h"
-#include "conn.h"
-#include "connector.h"
-#include "io_event_poll.h"
+﻿#include "cxpnet/cxpnet.h"
+
 #include <atomic>
-#include <chrono>
 #include <iostream>
 #include <thread>
 
@@ -14,108 +11,91 @@ public:
   EchoClient(const std::string& addr, uint16_t port, int message_count = 1000)
       : addr_(addr)
       , port_(port)
-      , message_count_(message_count)
-      , sent_count_(0)
-      , received_count_(0) {
-    connector_ = std::make_unique<Connector>(&event_poll_, addr_, port_);
-    connector_->set_conn_user_callback([this](const ConnPtr& conn) {
-      std::cout << "Connected to echo server" << std::endl;
-      conn_ = conn;
-
-      // Set up message and close callbacks
-      conn->set_conn_user_callbacks(
-          [this](Buffer* buffer) {
-            this->onMessage(buffer);
-          },
-          [this](int err) {
-            this->onClose(err);
-          });
-
-      // Start sending messages
-      sendMessage();
-    });
-
-    connector_->set_error_callback([this](int err) {
-      std::cout << "Connection error: " << err << std::endl;
-    });
+      , message_count_(message_count) {
   }
 
   void connect() {
-    connector_->start();
-  }
-
-  void disconnect() {
-    if (conn_) {
-      conn_->shutdown();
-    }
+    conn_ = std::make_shared<Conn>(&event_poll_);
+    conn_->connect(addr_.c_str(), port_,
+        [this](ConnPtr conn) {
+          std::cout << "Connected to echo server" << std::endl;
+          conn->set_conn_user_callbacks(
+              [this](Buffer* buffer) {
+                on_message_(buffer);
+              },
+              [this](int err) {
+                on_close_(err);
+              });
+          send_next_message_();
+        },
+        [this](int err) {
+          std::cout << "Connection error: " << err << std::endl;
+          event_poll_.shutdown();
+        });
   }
 
   void run() {
     event_poll_.run();
   }
 
-  void printStats() {
+  void print_stats() const {
     std::cout << "=== Client Statistics ===" << std::endl;
     std::cout << "Sent messages: " << sent_count_ << std::endl;
     std::cout << "Received messages: " << received_count_ << std::endl;
     std::cout << "========================" << std::endl;
   }
-private:
-  void sendMessage() {
-    if (sent_count_ < message_count_ && conn_ && conn_->connected()) {
-      std::string msg = "Message" + std::to_string(sent_count_ + 1) + " ";
-      conn_->send(msg);
-      sent_count_++;
 
-      // Schedule next message
-      event_poll_.run_in_poll([this]() {
-        sendMessage();
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-      }); // 10ms interval
-    } else if (sent_count_ >= message_count_) {
-      std::cout << "All messages sent. Waiting for responses..." << std::endl;
+private:
+  void send_next_message_() {
+    if (sent_count_ >= message_count_ || conn_ == nullptr || !conn_->connected()) {
+      return;
     }
+
+    std::string msg = "Message" + std::to_string(sent_count_ + 1) + " ";
+    conn_->send(msg);
+    sent_count_++;
   }
 
-  void onMessage(Buffer* buffer) {
+  void on_message_(Buffer* buffer) {
     std::string msg(buffer->peek(), buffer->readable_size());
+    std::cout << "Received echo: " << msg << std::endl;
     received_count_++;
     buffer->been_read_all();
 
     if (received_count_ >= message_count_) {
       std::cout << "All messages received. Stopping client." << std::endl;
-      printStats();
-      disconnect();
+      if (conn_ != nullptr) {
+        conn_->shutdown();
+      }
+      return;
     }
+
+    send_next_message_();
   }
 
-  void onClose(int err) {
+  void on_close_(int err) {
     std::cout << "Connection closed with error: " << err << std::endl;
-    conn_.reset();
+    event_poll_.shutdown();
   }
 
-  std::string                addr_;
-  uint16_t                   port_;
-  int                        message_count_;
-  std::atomic<int>           sent_count_;
-  std::atomic<int>           received_count_;
-  IOEventPoll                event_poll_;
-  std::unique_ptr<Connector> connector_;
-  ConnPtr                    conn_;
+  std::string      addr_;
+  uint16_t         port_;
+  int              message_count_;
+  std::atomic<int> sent_count_ {0};
+  std::atomic<int> received_count_ {0};
+  IOEventPoll      event_poll_;
+  ConnPtr          conn_;
 };
 
 int main() {
   EchoClient client("127.0.0.1", 9092, 1000);
-  client.connect();
 
-  // Run event loop in a separate thread
   std::thread t([&client]() {
     client.run();
   });
 
-  // Wait for client to finish
+  client.connect();
   t.join();
-
-  client.printStats();
+  client.print_stats();
   return 0;
 }
