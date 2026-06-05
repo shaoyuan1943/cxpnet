@@ -22,9 +22,7 @@ namespace cxpnet {
 
     bool listen();
     void shutdown();
-
     bool is_listen() const { return listening_; }
-
     void set_new_conn_callback(std::function<void(int, struct sockaddr_storage)>&& func) {
       on_conn_func_ = std::move(func);
     }

@@ -1,6 +1,6 @@
 ﻿#include "poller_for_epoll.h"
 #include "channel.h"
-#include "ensure.h"
+#include "check.h"
 #include "io_event_poll.h"
 #include "platform_api.h"
 
@@ -20,17 +20,19 @@ namespace cxpnet {
   void EpollPoller::shutdown() {
     while (!channels_.empty()) {
       auto it = channels_.begin();
-      remove_channel(it->second);
+      unregister_channel(it->second);
     }
   }
 
   int EpollPoller::poll(int timeout, std::vector<Channel*>& active_channels) {
-    ENSURE(owner_poll_->is_in_poll_thread(), "Unsafe cross-thread operations");
+    CXPNET_CHECK(owner_poll_->is_in_poll_thread(), "Unsafe cross-thread operations");
 
     int n = epoll_wait(epoll_fd_, &*events_.begin(), static_cast<int>(events_.size()), timeout);
     if (n > 0) {
       fill_active_channels(n, active_channels);
-      if (static_cast<size_t>(n) == events_.size()) { events_.resize(events_.size() * 2); }
+      if (static_cast<size_t>(n) == events_.size()) {
+        events_.resize(events_.size() * 2);
+      }
     }
 
     return n;
@@ -39,20 +41,15 @@ namespace cxpnet {
   void EpollPoller::update_channel(Channel* channel) {
     int  op         = 0;
     int  handle     = channel->handle();
-    bool registered = channel->registered_in_poller();
+    bool registered = has_channel(handle);
 
     if (!registered) {
       if (channel->events() != 0) {
         op                = EPOLL_CTL_ADD;
         channels_[handle] = channel;
-        channel->set_registered(true);
       }
     } else {
-      if (channel->is_none_event()) {
-        op = EPOLL_CTL_DEL;
-      } else {
-        op = EPOLL_CTL_MOD;
-      }
+      op = channel->is_none_event() ? EPOLL_CTL_DEL : EPOLL_CTL_ADD;
     }
 
     if (op != 0) {
@@ -61,21 +58,18 @@ namespace cxpnet {
 
     if (op == EPOLL_CTL_DEL) {
       channels_.erase(handle);
-      channel->set_registered(false);
     }
   }
 
-  void EpollPoller::remove_channel(Channel* channel) {
-    if (!channel->registered_in_poller()) {
-      return;
-    }
-
+  void EpollPoller::unregister_channel(Channel* channel) {
     int handle = channel->handle();
-    ENSURE(has_channel(handle), "{} not in channels_", handle);
-    ENSURE(channels_[handle] == channel, "Duplicate channel");
+    if (!has_channel(handle)) { return; }
 
+    CXPNET_CHECK(has_channel(handle), "{} not in channels_", handle);
+    CXPNET_CHECK(channels_[handle] == channel, "Duplicate channel");
+
+    update(EPOLL_CTL_DEL, channel);
     channels_.erase(handle);
-    channel->set_registered(false);
   }
 
   void EpollPoller::update(int op, Channel* channel) {
@@ -91,7 +85,8 @@ namespace cxpnet {
         return;
       }
 
-      ENSURE(false, "epoll_ctl failed for op={}, fd={}, errno={}", op, channel->handle(), errno);
+      CXPNET_CHECK(false, "epoll_ctl failed for op = {}, fd = {}, errno = {}",
+                   op, channel->handle(), errno);
     }
   }
 

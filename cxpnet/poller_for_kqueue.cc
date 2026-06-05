@@ -1,6 +1,6 @@
 ﻿#include "poller_for_kqueue.h"
 #include "channel.h"
-#include "ensure.h"
+#include "check.h"
 #include "io_event_poll.h"
 #include "platform_api.h"
 
@@ -20,13 +20,13 @@ namespace cxpnet {
   void KqueuePoller::shutdown() {
     while (!channels_.empty()) {
       auto it = channels_.begin();
-      remove_channel(it->second);
+      unregister_channel(it->second);
     }
     registered_events_.clear();
   }
 
   int KqueuePoller::poll(int timeout, std::vector<Channel*>& active_channels) {
-    ENSURE(owner_poll_->is_in_poll_thread(), "Unsafe cross-thread operations");
+    CXPNET_CHECK(owner_poll_->is_in_poll_thread(), "Unsafe cross-thread operations");
 
     struct timespec ts;
     struct timespec* tsp = nullptr;
@@ -71,19 +71,17 @@ namespace cxpnet {
       if (has_channel(fd)) {
         channels_.erase(fd);
         registered_events_.erase(fd);
-        channel->set_registered(false);
       }
     } else {
       // 添加或更新
       if (is_new) {
         channels_[fd] = channel;
-        channel->set_registered(true);
       }
       registered_events_[fd] = events;
     }
   }
 
-  void KqueuePoller::remove_channel(Channel* channel) {
+  void KqueuePoller::unregister_channel(Channel* channel) {
     int fd = channel->handle();
     if (!has_channel(fd)) return;
 
@@ -101,14 +99,13 @@ namespace cxpnet {
     }
 
     channels_.erase(fd);
-    channel->set_registered(false);
   }
 
   void KqueuePoller::register_read(int fd) {
     struct kevent ev;
     EV_SET(&ev, fd, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, nullptr);
     if (kevent(kqueue_fd_, &ev, 1, nullptr, 0, nullptr) < 0) {
-      ENSURE(false, "kqueue register_read failed for fd {}", fd);
+      CXPNET_CHECK(false, "kqueue register_read failed for fd {}", fd);
     }
   }
 
@@ -116,7 +113,7 @@ namespace cxpnet {
     struct kevent ev;
     EV_SET(&ev, fd, EVFILT_WRITE, EV_ADD | EV_ENABLE, 0, 0, nullptr);
     if (kevent(kqueue_fd_, &ev, 1, nullptr, 0, nullptr) < 0) {
-      ENSURE(false, "kqueue register_write failed for fd {}", fd);
+      CXPNET_CHECK(false, "kqueue register_write failed for fd {}", fd);
     }
   }
 

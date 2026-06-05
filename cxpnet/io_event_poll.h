@@ -28,12 +28,12 @@ namespace cxpnet {
     void run_in_poll(Closure func);
     void run_later(Closure func);
     void update_channel(Channel* channel);
-    void remove_channel(Channel* channel);
+    void unregister_channel(Channel* channel);
 
     void             set_name(std::string_view name) { name_ = name; }
     std::string_view name() const { return name_; }
     bool             is_in_poll_thread() const { return thread_id_ == std::this_thread::get_id(); }
-    bool             is_shutdown() const { return shut_.load(std::memory_order_acquire); }
+    bool             is_shutdown() const { return ACQUIRE_LOAD(shut_); }
     void             set_error_callback(std::function<void(IOEventPoll*, int)>&& func) { on_err_func_ = std::move(func); }
     TimerManager*    timer_manager() const { return timer_manager_.get(); }
   private:

@@ -3,11 +3,11 @@
 
 // 平台检测宏
 #if defined(__linux__)
-  #define CXP_PLATFORM_LINUX 1
+#define CXP_PLATFORM_LINUX 1
 #elif defined(__APPLE__)
-  #define CXP_PLATFORM_MACOS 1
+#define CXP_PLATFORM_MACOS 1
 #else
-  #error "Unsupported platform: cxpnet only supports Linux and macOS"
+#error "Unsupported platform: cxpnet only supports Linux and macOS"
 #endif
 
 // 平台无关头文件
@@ -27,6 +27,9 @@
 #include <regex>
 #include <string>
 
+#define ACQUIRE_LOAD(x) x.load(std::memory_order_acquire)
+#define RELEASE_STORE(x, value) x.store(value, std::memory_order_release)
+
 namespace cxpnet {
   class Conn;
   using socket_t                           = int;
@@ -43,15 +46,15 @@ namespace cxpnet {
     static const int kReuseAddr = 1 << 1;
   } // namespace SocketOption
 
-  static constexpr size_t   kMaxPollEventCount = 64;
-  static constexpr uint32_t kPollTimeoutMS     = 10000;
+  static constexpr size_t   kMaxPollEventCount    = 64;
+  static constexpr uint32_t kMaxIdlePollTimeoutMS = 1000;
   // clang-format off
   enum class ProtocolStack { kIPv4Only, kIPv6Only, kDualStack };
   enum class IPType { kInvalid, kIPv4, kIPv6 };
   enum class RunningMode { kOnePollPerThread, kAllOneThread };
   enum class State { kDisconnected, kConnecting, kConnected, kDisconnecting };
   // clang-format on
- 
+
   inline IPType ip_address_type(const std::string& address) {
     if (address.empty()) { return IPType::kInvalid; }
 

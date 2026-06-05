@@ -1,81 +1,50 @@
-﻿#include "cxpnet/cxpnet.h"
-#include <atomic>
-#include <chrono>
+#include <cxpnet/cxpnet.h>
+
+#include <cstdint>
+#include <cstdlib>
 #include <iostream>
-#include <mutex>
-#include <queue>
-#include <thread>
+#include <string>
+#include <string_view>
 
-using namespace cxpnet;
+namespace {
+  std::string make_response(std::string_view status, std::string_view body) {
+    return "HTTP/1.1 " + std::string(status) + "\r\n"
+        + "Content-Type: text/plain; charset=utf-8\r\n"
+        + "Content-Length: " + std::to_string(body.size()) + "\r\n"
+        + "Connection: close\r\n"
+        + "\r\n"
+        + std::string(body);
+  }
+} // namespace
 
-class HttpServer {
-public:
-  HttpServer(const std::string& addr, uint16_t port, int thread_num = 4)
-      : server_(addr.c_str(), port, ProtocolStack::kIPv4Only, SocketOption::kReuseAddr) {
-    server_.set_thread_num(thread_num);
-    server_.set_conn_user_callback([this](const ConnPtr& conn) {
-      std::cout << "New HTTP connection from "
-                << conn->remote_addr_and_port().first << ":"
-                << conn->remote_addr_and_port().second << std::endl;
+int main(int argc, char* argv[]) {
+  const char* host = argc > 1 ? argv[1] : "127.0.0.1";
+  uint16_t    port = argc > 2 ? static_cast<uint16_t>(std::atoi(argv[2])) : 8080;
+  cxpnet::Server server(host, port, cxpnet::ProtocolStack::kIPv4Only, cxpnet::SocketOption::kReuseAddr);
 
-      conn->set_conn_user_callbacks(
-          [this, conn](Buffer* buffer) {
-            this->onMessage(conn, buffer);
-          },
-          [this](int err) {
-            this->onClose(err);
-          });
+  server.set_thread_num(1);
+  server.set_conn_user_callback([](cxpnet::ConnPtr conn) {
+    conn->set_message_callback([conn](std::string_view data) {
+      std::string request(data);
+
+      if (request.starts_with("GET / ")) {
+        conn->send(make_response("200 OK", "hello from cxpnet http_server\n"));
+      } else {
+        conn->send(make_response("404 Not Found", "not found\n"));
+      }
+      conn->shutdown();
     });
+    conn->set_close_callback([](int err) {
+      std::cout << "http connection closed: " << err << std::endl;
+    });
+  });
+
+  if (!server.start(cxpnet::RunningMode::kOnePollPerThread)) {
+    std::cerr << "failed to start http server" << std::endl;
+    return 1;
   }
 
-  void start() {
-    if (!server_.start(RunningMode::kOnePollPerThread)) {
-      std::cout << "Failed to start HTTP server" << std::endl;
-      return;
-    }
-    std::cout << "HTTP server started, listening on port 8080" << std::endl;
-    server_.run();
-  }
-private:
-  void onMessage(const ConnPtr& conn, Buffer* buffer) {
-    std::string request(buffer->peek(), buffer->readable_size());
-    buffer->been_read_all();
-
-    // Simple HTTP request parsing
-    if (request.find("GET /") != std::string::npos) {
-      std::string response =
-          "HTTP/1.1 200 OK\r\n"
-          "Content-Type: text/html\r\n"
-          "Connection: close\r\n"
-          "\r\n"
-          "<html><body><h1>Hello from cxpnet HTTP Server!</h1></body></html>";
-
-      conn->send(response);
-      conn->shutdown(); // Close connection after response
-    } else {
-      std::string response =
-          "HTTP/1.1 404 Not Found\r\n"
-          "Content-Type: text/html\r\n"
-          "Connection: close\r\n"
-          "\r\n"
-          "<html><body><h1>404 Not Found</h1></body></html>";
-
-      conn->send(response);
-
-      std::cout << "Conn Handle: " << conn->native_handle() << std::endl;
-      conn->shutdown(); // Close connection after response
-    }
-  }
-
-  void onClose(int err) {
-    std::cout << "HTTP connection closed with error: " << err << std::endl;
-  }
-
-  Server server_;
-};
-
-int main() {
-  HttpServer server("127.0.0.1", 8080, 4);
-  server.start();
+  std::cout << "http server listening on " << host << ":" << port << std::endl;
+  server.run();
   return 0;
 }

@@ -18,7 +18,7 @@ namespace cxpnet {
     void shutdown() override;
     int  poll(int timeout, std::vector<Channel*>& active_channels) override;
     void update_channel(Channel* channel) override;
-    void remove_channel(Channel* channel) override;
+    void unregister_channel(Channel* channel) override;
   private:
     void update(int op, Channel* channel);
     void fill_active_channels(int event_n, std::vector<Channel*>& active_channels);

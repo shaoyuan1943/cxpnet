@@ -1,4 +1,4 @@
-﻿#include "ensure.h"
+﻿#include "check.h"
 #include "platform_api.h"
 #include "sock.h"
 
@@ -15,6 +15,7 @@ namespace cxpnet {
 
   bool Platform::set_non_blocking(int fd) {
     int option = fcntl(fd, F_GETFL, 0);
+    if (option < 0) { return false; }
     return fcntl(fd, F_SETFL, option | O_NONBLOCK) == 0;
   }
 
@@ -89,17 +90,22 @@ namespace cxpnet {
     if (addr_storage.ss_family == AF_INET6 && proto_stack == ProtocolStack::kDualStack) {
       int ipv6_only = 0;
       if (::setsockopt(handle, IPPROTO_IPV6, IPV6_V6ONLY, &ipv6_only, sizeof(ipv6_only)) == SOCKET_ERROR) {
-        if (ipv6_only == 0) {
-          close_handle(handle);
-          return invalid_socket;
-        }
+        close_handle(handle);
+        return invalid_socket;
       }
     }
 
-    // macOS 没有 SO_REUSEPORT，使用 SO_REUSEADDR 替代
     if ((option & SocketOption::kReuseAddr) == SocketOption::kReuseAddr) {
       int reuse_addr = 1;
       if (::setsockopt(handle, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr)) == SOCKET_ERROR) {
+        close_handle(handle);
+        return invalid_socket;
+      }
+    }
+
+    if ((option & SocketOption::kReusePort) == SocketOption::kReusePort) {
+      int reuse_port = 1;
+      if (::setsockopt(handle, SOL_SOCKET, SO_REUSEPORT, &reuse_port, sizeof(reuse_port)) == SOCKET_ERROR) {
         close_handle(handle);
         return invalid_socket;
       }
@@ -268,7 +274,7 @@ namespace cxpnet {
     ssize_t n = ::write(fd, &c, sizeof(c));
     // EAGAIN 是正常的，说明已经有唤醒信号在等待
     if (n < 0 && errno != EAGAIN) {
-      ENSURE(false, "wakeup_write failed");
+      CXPNET_CHECK(false, "wakeup_write failed");
     }
   }
 
@@ -281,7 +287,7 @@ namespace cxpnet {
         if (errno == EAGAIN) {
           break;
         }
-        ENSURE(false, "wakeup_read failed");
+        CXPNET_CHECK(false, "wakeup_read failed");
       }
       if (n == 0) {
         break;

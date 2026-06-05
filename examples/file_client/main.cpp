@@ -1,105 +1,69 @@
-﻿#include "cxpnet/cxpnet.h"
+#include <cxpnet/cxpnet.h>
 
-#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
-#include <mutex>
-#include <thread>
+#include <string>
+#include <string_view>
 
-using namespace cxpnet;
-
-class FileClient {
-public:
-  FileClient(const std::string& addr, uint16_t port)
-      : addr_(addr)
-      , port_(port) {
-  }
-
-  void connect() {
-    conn_ = std::make_shared<Conn>(&event_poll_);
-
-    conn_->connect(addr_.c_str(), port_,
-        [this](ConnPtr conn) {
-          std::cout << "Connected to file server" << std::endl;
-
-          conn->set_conn_user_callbacks(
-              [this](Buffer* buffer) {
-                this->onMessage(buffer);
-              },
-              [this](int err) {
-                this->onClose(err);
-              });
-
-          std::lock_guard<std::mutex> lock(mutex_);
-          if (!pending_request_.empty()) {
-            conn_->send(pending_request_);
-            pending_request_.clear();
-          }
-        },
-        [this](int err) {
-          std::cout << "Connection error: " << err << std::endl;
-          event_poll_.shutdown();
-        });
-  }
-
-  void requestFile(const std::string& filename) {
-    std::string request = "GET " + filename;
-
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (conn_ && conn_->connected()) {
-      conn_->send(request);
-      return;
+namespace {
+  bool write_response_body(std::string_view response, const std::filesystem::path& output_path) {
+    constexpr std::string_view ok_prefix = "OK ";
+    if (!response.starts_with(ok_prefix)) {
+      std::cout << response << std::endl;
+      return false;
     }
 
-    pending_request_ = std::move(request);
-  }
-
-  void disconnect() {
-    if (conn_) {
-      conn_->shutdown();
+    size_t header_end = response.find('\n');
+    if (header_end == std::string_view::npos) {
+      std::cerr << "invalid file response" << std::endl;
+      return false;
     }
+
+    std::ofstream output(output_path, std::ios::binary);
+    if (!output.is_open()) {
+      std::cerr << "failed to open output file: " << output_path.string() << std::endl;
+      return false;
+    }
+
+    std::string_view body = response.substr(header_end + 1);
+    output.write(body.data(), static_cast<std::streamsize>(body.size()));
+    std::cout << "wrote " << body.size() << " bytes to " << output_path.string() << std::endl;
+    return true;
   }
+} // namespace
 
-  void run() {
-    event_poll_.run();
-  }
+int main(int argc, char* argv[]) {
+  const char*           host = argc > 1 ? argv[1] : "127.0.0.1";
+  uint16_t              port = argc > 2 ? static_cast<uint16_t>(std::atoi(argv[2])) : 9094;
+  std::string           remote_path = argc > 3 ? argv[3] : "sample.txt";
+  std::filesystem::path output_path = argc > 4 ? argv[4] : "downloaded_sample.txt";
+  cxpnet::SampleClient  client(host, port);
 
-private:
-  void onMessage(Buffer* buffer) {
-    std::string response(buffer->peek(), buffer->readable_size());
-    std::cout << "File server response:" << std::endl;
-    std::cout << response << std::endl;
-    buffer->been_read_all();
-    disconnect();
-  }
+  client.set_conn_user_callback([&](cxpnet::ConnPtr conn) {
+    conn->set_message_callback([&](std::string_view response) {
+      write_response_body(response, output_path);
+    });
+    conn->set_close_callback([&](int err) {
+      std::cout << "file connection closed: " << err << std::endl;
+      client.close();
+    });
 
-  void onClose(int err) {
-    std::cout << "File transfer connection closed with error: " << err << std::endl;
-    conn_.reset();
-    event_poll_.shutdown();
-  }
-
-  std::string addr_;
-  uint16_t    port_;
-  IOEventPoll event_poll_;
-  ConnPtr     conn_;
-  std::mutex  mutex_;
-  std::string pending_request_;
-};
-
-int main() {
-  FileClient client("127.0.0.1", 9094);
-  std::thread t([&client]() {
-    client.run();
+    client.send("GET " + remote_path + "\n");
   });
 
-  std::string filename;
-  std::cout << "Enter filename to request: ";
-  std::getline(std::cin, filename);
+  client.set_error_user_callback([&](int err) {
+    std::cerr << "connect failed: " << err << std::endl;
+    client.close();
+  });
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  client.connect();
-  client.requestFile(filename);
+  if (!client.connect()) {
+    std::cerr << "client connect request was rejected" << std::endl;
+    return 1;
+  }
 
-  t.join();
+  client.run();
   return 0;
 }

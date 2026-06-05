@@ -68,8 +68,7 @@ namespace cxpnet {
 
   void Acceptor::shutdown_in_poll_() {
     if (channel_) {
-      channel_->clear_event();
-      channel_->remove();
+      channel_->unregister();
       channel_.reset();
     }
 

@@ -1,7 +1,7 @@
 ﻿#ifndef BUFFER_H
 #define BUFFER_H
 
-#include "ensure.h"
+#include "check.h"
 #include "sock.h"
 
 #include <algorithm>
@@ -69,7 +69,7 @@ namespace cxpnet {
     const char* peek() const { return data_ + read_index_; }
 
     void been_read(size_t len) {
-      ENSURE(len <= readable_size(), "been_read: len exceeds readable size");
+      CXPNET_CHECK(len <= readable_size(), "been_read: len exceeds readable size");
       if (len == 0) { return; }
       if (len == readable_size()) {
         read_index_ = write_index_;
@@ -86,13 +86,13 @@ namespace cxpnet {
 
     char* to_write() const { return data_ + write_index_; }
     void  been_written(size_t len) {
-      ENSURE(len <= writable_size(), "been_written: len exceeds writable size");
+      CXPNET_CHECK(len <= writable_size(), "been_written: len exceeds writable size");
       write_index_ += len;
     }
 
     void append(std::string_view data) { append(data.data(), data.size()); }
     void append(const char* data, size_t len) {
-      ENSURE(len > 0, "append size must > 0");
+      CXPNET_CHECK(len > 0, "append size must > 0");
       ensure_writable_size(len);
       std::memcpy(to_write(), data, len);
       been_written(len);

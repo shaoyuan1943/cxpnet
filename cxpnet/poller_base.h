@@ -18,7 +18,7 @@ namespace cxpnet {
     virtual void shutdown()                                                = 0;
     virtual int  poll(int timeout, std::vector<Channel*>& active_channels) = 0;
     virtual void update_channel(Channel* channel)                          = 0;
-    virtual void remove_channel(Channel* channel)                          = 0;
+    virtual void unregister_channel(Channel* channel)                      = 0;
 
     bool has_channel(int handle) const {
       return channels_.find(handle) != channels_.end();

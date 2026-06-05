@@ -1,4 +1,4 @@
-﻿#include "ensure.h"
+﻿#include "check.h"
 #include "platform_api.h"
 #include "sock.h"
 
@@ -10,6 +10,8 @@ namespace cxpnet {
 
   bool Platform::set_non_blocking(int fd) {
     int option = fcntl(fd, F_GETFL, 0);
+    if (option < 0) { return false; }
+
     return fcntl(fd, F_SETFL, option | O_NONBLOCK) == 0;
   }
 
@@ -227,7 +229,7 @@ namespace cxpnet {
     ssize_t  n   = ::write(fd, &one, sizeof(one));
     // EAGAIN 是正常的，说明已经有唤醒信号在等待
     if (n < 0 && errno != EAGAIN) {
-      ENSURE(false, "wakeup_write failed");
+      CXPNET_CHECK(false, "wakeup_write failed");
     }
   }
 
@@ -235,7 +237,7 @@ namespace cxpnet {
     uint64_t one = 1;
     ssize_t  n   = ::read(fd, &one, sizeof(one));
     if (n < 0 && errno != EAGAIN) {
-      ENSURE(false, "wakeup_read failed");
+      CXPNET_CHECK(false, "wakeup_read failed");
     }
   }
 } // namespace cxpnet

@@ -58,6 +58,7 @@ set(COMMON_SOURCES
   cxpnet/conn.cc
   cxpnet/io_event_poll.cc
   cxpnet/poll_thread_pool.cc
+  cxpnet/sample_client.cc
   cxpnet/server.cc
   cxpnet/timer.cc
 )

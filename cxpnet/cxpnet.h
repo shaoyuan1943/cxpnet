@@ -4,6 +4,7 @@
 #include "buffer.h"
 #include "conn.h"
 #include "io_event_poll.h"
+#include "sample_client.h"
 #include "server.h"
 
 #endif // CXPNET_H

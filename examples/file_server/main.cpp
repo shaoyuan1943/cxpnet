@@ -1,82 +1,80 @@
-﻿#include "cxpnet/cxpnet.h"
+#include <cxpnet/cxpnet.h>
 
+#include <cstdint>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <thread>
+#include <string_view>
 
-using namespace cxpnet;
-
-class FileServer {
-public:
-  FileServer(const std::string& addr, uint16_t port, int thread_num = 4)
-      : server_(addr.c_str(), port, ProtocolStack::kIPv4Only, SocketOption::kReuseAddr) {
-    server_.set_thread_num(thread_num);
-    server_.set_conn_user_callback([this](const ConnPtr& conn) {
-      std::cout << "New file transfer connection from "
-                << conn->remote_addr_and_port().first << ":"
-                << conn->remote_addr_and_port().second << std::endl;
-
-      conn->set_conn_user_callbacks(
-          [this, conn](Buffer* buffer) {
-            this->onMessage(conn, buffer);
-          },
-          [this](int err) {
-            this->onClose(err);
-          });
-    });
+namespace {
+  bool is_safe_relative_path(const std::filesystem::path& path) {
+    if (path.empty() || path.is_absolute()) { return false; }
+    for (const auto& part : path) {
+      if (part == "..") { return false; }
+    }
+    return true;
   }
 
-  void start() {
-    if (!server_.start(RunningMode::kOnePollPerThread)) {
-      std::cout << "Failed to start file server" << std::endl;
-      return;
+  std::string read_file(const std::filesystem::path& root, const std::string& requested_path) {
+    std::filesystem::path relative_path(requested_path);
+    if (!is_safe_relative_path(relative_path)) {
+      return "ERR invalid path\n";
     }
 
-    std::cout << "File server started, listening on port 9094" << std::endl;
-    server_.run();
+    std::ifstream file(root / relative_path, std::ios::binary);
+    if (!file.is_open()) {
+      return "ERR file not found\n";
+    }
+
+    std::ostringstream content;
+    content << file.rdbuf();
+    return "OK " + std::to_string(content.str().size()) + "\n" + content.str();
   }
-private:
-  void onMessage(const ConnPtr& conn, Buffer* buffer) {
-    std::string request(buffer->peek(), buffer->readable_size());
-    buffer->been_read_all();
+} // namespace
 
-    if (request.rfind("GET ", 0) == 0) {
-      std::string filename = request.substr(4);
-      filename             = filename.substr(0, filename.find_first_of("\r\n "));
-      std::cout << "Received GET request for file: " << filename << std::endl;
+int main(int argc, char* argv[]) {
+  const char*           host = argc > 1 ? argv[1] : "127.0.0.1";
+  uint16_t              port = argc > 2 ? static_cast<uint16_t>(std::atoi(argv[2])) : 9094;
+  std::filesystem::path root = argc > 3 ? argv[3] : ".";
+  cxpnet::Server        server(host, port, cxpnet::ProtocolStack::kIPv4Only, cxpnet::SocketOption::kReuseAddr);
 
-      std::ifstream file(filename, std::ios::binary);
-      if (!file.is_open()) {
-        conn->send("ERROR: file not found\n");
+  server.set_thread_num(1);
+  server.set_conn_user_callback([root](cxpnet::ConnPtr conn) {
+    conn->set_message_callback([root, conn](std::string_view data) {
+      std::string request(data);
+
+      if (!request.starts_with("GET ")) {
+        conn->send("ERR unsupported command\n");
         conn->shutdown();
         return;
       }
 
-      std::ostringstream content;
-      content << file.rdbuf();
+      std::string filename = request.substr(4);
+      if (!filename.empty() && filename.back() == '\n') {
+        filename.pop_back();
+      }
+      if (!filename.empty() && filename.back() == '\r') {
+        filename.pop_back();
+      }
 
-      std::string response = "OK\n" + content.str();
-      conn->send(response);
+      conn->send(read_file(root, filename));
       conn->shutdown();
-      return;
-    }
+    });
+    conn->set_close_callback([](int err) {
+      std::cout << "file connection closed: " << err << std::endl;
+    });
+  });
 
-    std::cout << "Received unknown command: " << request << std::endl;
-    conn->send("ERROR: unsupported command\n");
-    conn->shutdown();
+  if (!server.start(cxpnet::RunningMode::kOnePollPerThread)) {
+    std::cerr << "failed to start file server" << std::endl;
+    return 1;
   }
 
-  void onClose(int err) {
-    std::cout << "File transfer connection closed with error: " << err << std::endl;
-  }
-
-  Server server_;
-};
-
-int main() {
-  FileServer server("127.0.0.1", 9094, 4);
-  server.start();
+  std::cout << "file server listening on " << host << ":" << port
+            << ", root=" << root.string() << std::endl;
+  server.run();
   return 0;
 }

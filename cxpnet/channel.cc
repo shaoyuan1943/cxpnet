@@ -1,5 +1,5 @@
 ﻿#include "channel.h"
-#include "ensure.h"
+#include "check.h"
 #include "io_event_poll.h"
 #include "platform_api.h"
 
@@ -9,7 +9,6 @@ namespace cxpnet {
       , handle_ {handle}
       , events_ {0}
       , result_events_ {0}
-      , registered_ {false}
       , tied_ {false}
       , on_read_func_ {nullptr}
       , on_write_func_ {nullptr}
@@ -34,11 +33,6 @@ namespace cxpnet {
     update_();
   }
 
-  void Channel::clear_event() {
-    events_ = 0;
-    update_();
-  }
-
   void Channel::handle_event() {
     if (tied_) {
       if (auto sp = tie_.lock()) { handle_event_(); }
@@ -53,8 +47,9 @@ namespace cxpnet {
     tied_ = true;
   }
 
-  void Channel::remove() {
-    event_poll_->remove_channel(this);
+  void Channel::unregister() {
+    events_ = events::kNone;
+    event_poll_->unregister_channel(this);
   }
 
   void Channel::update_() {

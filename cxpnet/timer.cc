@@ -10,61 +10,64 @@ namespace cxpnet {
   }
 
   void Timer::execute() const {
-    if (callback_ && !cancelled_.load(std::memory_order_acquire)) {
+    if (callback_ && !ACQUIRE_LOAD(cancelled_)) {
       callback_();
     }
   }
 
-  TimerManager::TimerManager() {
-    timer_thread_ = std::thread(&TimerManager::timer_thread_func_, this);
-  }
+  TimerManager::TimerManager(Closure wakeup_func)
+      : wakeup_func_(std::move(wakeup_func)) {}
 
   TimerManager::~TimerManager() { shutdown(); }
 
   Timer::TimerID TimerManager::add_timer(uint32_t delay_ms, Timer::Callback cb) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    bool           should_wakeup = false;
+    Timer::TimerID id            = 0;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
 
-    if (!running_.load(std::memory_order_acquire)) { return 0; }
+      if (!ACQUIRE_LOAD(running_)) { return 0; }
 
-    Timer::TimerID id     = next_id_++;
-    auto           timer  = std::make_unique<Timer>(id, delay_ms, std::move(cb));
-    auto           when   = timer->expire_time_;
-    auto           it     = schedule_.emplace(when, id);
-    scheduled_timers_[id] = it;
-    timers_[id]           = std::move(timer);
+      id                    = next_id_++;
+      auto timer            = std::make_unique<Timer>(id, delay_ms, std::move(cb));
+      auto when             = timer->expire_time_;
+      should_wakeup         = schedule_.empty() || when < schedule_.begin()->first;
+      auto it               = schedule_.emplace(when, id);
+      scheduled_timers_[id] = it;
+      timers_[id]           = std::move(timer);
+    }
 
-    cv_.notify_one();
+    if (should_wakeup && wakeup_func_) { wakeup_func_(); }
     return id;
   }
 
   void TimerManager::cancel_timer(Timer::TimerID id) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    bool should_wakeup = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
 
-    if (!running_.load(std::memory_order_acquire)) { return; }
+      if (!ACQUIRE_LOAD(running_)) { return; }
 
-    auto timer_it = timers_.find(id);
-    if (timer_it == timers_.end()) { return; }
+      auto timer_it = timers_.find(id);
+      if (timer_it == timers_.end()) { return; }
 
-    timer_it->second->cancel();
+      timer_it->second->cancel();
 
-    auto scheduled_it = scheduled_timers_.find(id);
-    if (scheduled_it != scheduled_timers_.end()) {
-      schedule_.erase(scheduled_it->second);
-      scheduled_timers_.erase(scheduled_it);
+      auto scheduled_it = scheduled_timers_.find(id);
+      if (scheduled_it != scheduled_timers_.end()) {
+        should_wakeup = scheduled_it->second == schedule_.begin();
+        schedule_.erase(scheduled_it->second);
+        scheduled_timers_.erase(scheduled_it);
+      }
+
+      timers_.erase(timer_it);
     }
 
-    timers_.erase(timer_it);
-    cv_.notify_one();
+    if (should_wakeup && wakeup_func_) { wakeup_func_(); }
   }
 
   void TimerManager::shutdown() {
     if (!running_.exchange(false, std::memory_order_acq_rel)) { return; }
-
-    cv_.notify_all();
-
-    if (timer_thread_.joinable()) {
-      timer_thread_.join();
-    }
 
     std::lock_guard<std::mutex> lock(mutex_);
     timers_.clear();
@@ -72,57 +75,60 @@ namespace cxpnet {
     schedule_.clear();
   }
 
-  void TimerManager::timer_thread_func_() {
-    while (running_.load(std::memory_order_acquire)) {
-      std::unique_lock<std::mutex> lock_guard(mutex_);
+  uint32_t TimerManager::next_timeout_ms(uint32_t default_timeout_ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
 
-      cv_.wait(lock_guard, [this] {
-        return !running_.load(std::memory_order_acquire) || !schedule_.empty();
-      });
+    if (!ACQUIRE_LOAD(running_)) { return 0; }
+    if (schedule_.empty()) { return default_timeout_ms; }
 
-      if (!running_.load(std::memory_order_acquire)) { break; }
+    auto now  = std::chrono::steady_clock::now();
+    auto when = schedule_.begin()->first;
+    if (when <= now) { return 0; }
 
-      TimePoint earliest_expire_time = schedule_.begin()->first;
-      (void)cv_.wait_until(lock_guard, earliest_expire_time, [this, earliest_expire_time] {
-        if (!running_.load(std::memory_order_acquire)) { return true; }
-        if (schedule_.empty()) { return true; }
-
-        return schedule_.begin()->first < earliest_expire_time;
-      });
-
-      if (!running_.load(std::memory_order_acquire)) { break; }
-
-      auto                         now = std::chrono::steady_clock::now();
-      std::vector<Timer::Callback> expired_callbacks;
-
-      while (!schedule_.empty()) {
-        auto scheduled_it = schedule_.begin();
-        if (scheduled_it->first > now) { break; }
-
-        Timer::TimerID id = scheduled_it->second;
-        schedule_.erase(scheduled_it);
-        scheduled_timers_.erase(id);
-
-        auto timer_it = timers_.find(id);
-        if (timer_it == timers_.end()) { continue; }
-        if (timer_it->second->cancelled()) {
-          timers_.erase(timer_it);
-          continue;
-        }
-
-        expired_callbacks.push_back(std::move(timer_it->second->callback_));
-        timers_.erase(timer_it);
-      }
-
-      lock_guard.unlock();
-
-      for (auto& callback : expired_callbacks) {
-        if (!running_.load(std::memory_order_acquire)) { break; }
-        if (callback) {
-          callback();
-        }
-      }
+    auto remaining = std::chrono::ceil<std::chrono::milliseconds>(when - now).count();
+    if (remaining <= 0) { return 0; }
+    if (static_cast<uint64_t>(remaining) < default_timeout_ms) {
+      return static_cast<uint32_t>(remaining);
     }
+
+    return default_timeout_ms;
+  }
+
+  void TimerManager::run_expired() {
+    auto expired_callbacks = take_expired_callbacks_();
+    for (auto& callback : expired_callbacks) {
+      if (!ACQUIRE_LOAD(running_)) { break; }
+      if (callback) { callback(); }
+    }
+  }
+
+  std::vector<Timer::Callback> TimerManager::take_expired_callbacks_() {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<Timer::Callback> expired_callbacks;
+    if (!ACQUIRE_LOAD(running_)) { return expired_callbacks; }
+
+    auto now = std::chrono::steady_clock::now();
+    while (!schedule_.empty()) {
+      auto scheduled_it = schedule_.begin();
+      if (scheduled_it->first > now) { break; }
+
+      Timer::TimerID id = scheduled_it->second;
+      schedule_.erase(scheduled_it);
+      scheduled_timers_.erase(id);
+
+      auto timer_it = timers_.find(id);
+      if (timer_it == timers_.end()) { continue; }
+      if (timer_it->second->cancelled()) {
+        timers_.erase(timer_it);
+        continue;
+      }
+
+      expired_callbacks.push_back(std::move(timer_it->second->callback_));
+      timers_.erase(timer_it);
+    }
+
+    return expired_callbacks;
   }
 
 } // namespace cxpnet

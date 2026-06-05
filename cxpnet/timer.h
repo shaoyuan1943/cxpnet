@@ -3,21 +3,20 @@
 
 #include "sock.h"
 
+#include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
-#include <thread>
 #include <unordered_map>
+#include <vector>
 
 namespace cxpnet {
 
   class Timer;
   class TimerManager;
 
-  // 定时器对象
   class Timer : public NonCopyable {
   public:
     using TimerID  = uint64_t;
@@ -28,8 +27,8 @@ namespace cxpnet {
 
     TimerID  id() const { return id_; }
     uint32_t delay_ms() const { return delay_ms_; }
-    bool     cancelled() const { return cancelled_.load(std::memory_order_acquire); }
-    void     cancel() { cancelled_.store(true, std::memory_order_release); }
+    bool     cancelled() const { return ACQUIRE_LOAD(cancelled_); }
+    void     cancel() { RELEASE_STORE(cancelled_, true); }
     void     execute() const;
 
     bool operator<(const Timer& other) const { return expire_time_ < other.expire_time_; }
@@ -45,14 +44,16 @@ namespace cxpnet {
 
   class TimerManager : public NonCopyable {
   public:
-    TimerManager();
+    explicit TimerManager(Closure wakeup_func = nullptr);
     ~TimerManager();
 
     Timer::TimerID add_timer(uint32_t delay_ms, Timer::Callback cb);
     void           cancel_timer(Timer::TimerID id);
     void           shutdown();
+    uint32_t       next_timeout_ms(uint32_t default_timeout_ms);
+    void           run_expired();
   private:
-    void timer_thread_func_();
+    std::vector<Timer::Callback> take_expired_callbacks_();
 
     using TimePoint   = std::chrono::steady_clock::time_point;
     using ScheduleMap = std::multimap<TimePoint, Timer::TimerID>;
@@ -61,10 +62,9 @@ namespace cxpnet {
     std::unordered_map<Timer::TimerID, ScheduleMap::iterator>  scheduled_timers_;
     ScheduleMap                                                schedule_;
     std::mutex                                                 mutex_;
-    std::condition_variable                                    cv_;
-    std::thread                                                timer_thread_;
     std::atomic_bool                                           running_ {true};
     Timer::TimerID                                             next_id_ {1};
+    Closure                                                    wakeup_func_;
   };
 
 } // namespace cxpnet

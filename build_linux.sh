@@ -7,6 +7,28 @@ BUILD_TYPE="Release"
 BUILD_TYPE_DIR="release"
 OUTPUT_SUFFIX=""
 EXAMPLES_DIR="examples"
+EXAMPLE_TARGETS=(
+  echo_server
+  echo_client
+  manual_conn_client
+  all_one_thread_server
+  http_server
+  http_client
+  file_server
+  file_client
+  timer_poll
+)
+
+usage() {
+  echo "Usage: $0 [debug|release] {clean|lib|examples|all|example_name}"
+  echo
+  echo "Actions:"
+  echo "  clean          Recreate the selected build directory"
+  echo "  lib            Build only the cxpnet library"
+  echo "  examples       Build all example targets"
+  echo "  all            Build the whole source tree"
+  echo "  example_name   Build one example target, such as echo_server"
+}
 
 if command -v g++-13 >/dev/null 2>&1; then
   export CXX=g++-13
@@ -20,7 +42,7 @@ else
 fi
 
 if [ $# -eq 0 ]; then
-  echo "Usage: $0 [debug|release] {clean|all|example_name}"
+  usage
   exit 1
 fi
 
@@ -40,25 +62,41 @@ case "$1" in
 esac
 
 if [ $# -eq 0 ]; then
-  echo "Usage: $0 [debug|release] {clean|all|example_name}"
+  usage
   exit 1
 fi
 
 BUILD_DIR="$BUILD_ROOT/$BUILD_TYPE_DIR"
 ACTION=$1
 
+example_exists() {
+  local example_name=$1
+  [ -f "$EXAMPLES_DIR/$example_name/CMakeLists.txt" ]
+}
+
+example_binary_path() {
+  local example_name=$1
+  echo "$BUILD_DIR/$EXAMPLES_DIR/$example_name/${example_name}${OUTPUT_SUFFIX}"
+}
+
+print_example_path() {
+  local example_name=$1
+  echo "  $(example_binary_path "$example_name")"
+}
+
 ensure_cmake_project() {
   if [ ! -f "$BUILD_DIR/Makefile" ]; then
     echo "Build directory or Makefile not found. Generating CMake project..."
-    rm -rf "$BUILD_DIR"
     mkdir -p "$BUILD_DIR"
-    cmake -S . -B "$BUILD_DIR" \
-      -DCMAKE_CXX_COMPILER="$CXX" \
-      -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
   fi
+
+  echo "Updating CMake project..."
+  cmake -S . -B "$BUILD_DIR" \
+    -DCMAKE_CXX_COMPILER="$CXX" \
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
 }
 
-case $ACTION in
+case "$ACTION" in
   clean)
     echo "Cleaning $BUILD_TYPE build directory..."
     rm -rf "$BUILD_DIR"
@@ -70,46 +108,49 @@ case $ACTION in
     echo "Clean and CMake generation completed."
     ;;
 
+  lib)
+    ensure_cmake_project
+    echo "Building cxpnet library ($BUILD_TYPE)..."
+    cmake --build "$BUILD_DIR" --target cxpnet -j"$(nproc)"
+    echo "Library built successfully."
+    ;;
+
+  examples)
+    ensure_cmake_project
+    echo "Building all examples ($BUILD_TYPE)..."
+    for example_name in "${EXAMPLE_TARGETS[@]}"; do
+      cmake --build "$BUILD_DIR" --target "$example_name" -j"$(nproc)"
+    done
+    echo "All examples built successfully. Binaries:"
+    for example_name in "${EXAMPLE_TARGETS[@]}"; do
+      print_example_path "$example_name"
+    done
+    ;;
+
   all)
     ensure_cmake_project
-
     echo "Building cxpnet library and all examples ($BUILD_TYPE)..."
     cmake --build "$BUILD_DIR" -j"$(nproc)"
-    echo "All examples built successfully."
-
-    echo "Copying executables..."
-    find "$BUILD_DIR/$EXAMPLES_DIR" -type f -executable | while read -r exe_path; do
-      exe_name=$(basename "$exe_path")
-      dest_dir="$EXAMPLES_DIR/$exe_name/"
-
-      if [ -d "$dest_dir" ]; then
-        echo "  - Copying $exe_name to $dest_dir"
-        cp "$exe_path" "$dest_dir"
-      fi
+    echo "Build completed. Example binaries:"
+    for example_name in "${EXAMPLE_TARGETS[@]}"; do
+      print_example_path "$example_name"
     done
-    echo "Copying completed."
     ;;
 
   *)
     EXAMPLE_NAME=$ACTION
 
-    if [ ! -d "$EXAMPLES_DIR/$EXAMPLE_NAME" ]; then
+    if ! example_exists "$EXAMPLE_NAME"; then
       echo "Error: example '$EXAMPLE_NAME' not found in $EXAMPLES_DIR/"
+      usage
       exit 1
     fi
 
     ensure_cmake_project
-
     echo "Building example: $EXAMPLE_NAME ($BUILD_TYPE)"
     cmake --build "$BUILD_DIR" --target "$EXAMPLE_NAME" -j"$(nproc)"
     echo "Example '$EXAMPLE_NAME' built successfully."
-
-    SOURCE_EXE="$BUILD_DIR/$EXAMPLES_DIR/$EXAMPLE_NAME/${EXAMPLE_NAME}${OUTPUT_SUFFIX}"
-    DEST_DIR="$EXAMPLES_DIR/$EXAMPLE_NAME/"
-
-    echo "Copying $EXAMPLE_NAME to $DEST_DIR..."
-    cp "$SOURCE_EXE" "$DEST_DIR"
-    echo "Copying completed."
+    echo "Binary: $(example_binary_path "$EXAMPLE_NAME")"
     ;;
 esac
 

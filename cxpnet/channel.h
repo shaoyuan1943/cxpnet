@@ -14,16 +14,13 @@ namespace cxpnet {
     Channel(IOEventPoll* event_poll, int handle);
     ~Channel() {}
 
-    void remove();
+    void unregister();
     void add_read_event();
     void add_write_event();
     void remove_write_event();
-    void clear_event();
     void handle_event();
     void tie(const std::shared_ptr<void>& ptr);
 
-    bool         registered_in_poller() const { return registered_; }
-    void         set_registered(bool registered) { registered_ = registered; }
     int          handle() const { return handle_; }
     int          events() const { return events_; }
     void         set_result_events(int events) { result_events_ = events; }
@@ -41,9 +38,8 @@ namespace cxpnet {
   private:
     IOEventPoll*             event_poll_;
     int                      handle_;
-    int                      events_;        // 统一事件
-    int                      result_events_; // 统一事件
-    bool                     registered_;
+    int                      events_;
+    int                      result_events_;
     bool                     tied_;
     std::weak_ptr<void>      tie_;
     std::function<void()>    on_read_func_;

@@ -27,7 +27,7 @@ namespace cxpnet {
   private:
     std::vector<IOEventPoll*>                 polls_;
     std::vector<std::unique_ptr<std::thread>> threads_;
-    std::atomic<size_t>                       next_; // 改为 atomic 类型，确保线程安全
+    std::atomic<size_t>                       next_;
     std::atomic<bool>                         shut_;
   };
 } // namespace cxpnet

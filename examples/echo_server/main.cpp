@@ -1,65 +1,35 @@
-﻿#include "cxpnet/cxpnet.h"
+#include <cxpnet/cxpnet.h>
 
-#include <atomic>
+#include <cstdint>
+#include <cstdlib>
 #include <iostream>
+#include <string_view>
 
-using namespace cxpnet;
+int main(int argc, char* argv[]) {
+  const char*  host = argc > 1 ? argv[1] : "127.0.0.1";
+  uint16_t     port = argc > 2 ? static_cast<uint16_t>(std::atoi(argv[2])) : 9090;
+  const int    poll_threads = argc > 3 ? std::atoi(argv[3]) : 1;
+  cxpnet::Server server(host, port, cxpnet::ProtocolStack::kIPv4Only, cxpnet::SocketOption::kReuseAddr);
 
-class EchoServer {
-public:
-  EchoServer(const std::string& addr, uint16_t port, int thread_num = 4)
-      : server_(addr.c_str(), port, ProtocolStack::kIPv4Only, SocketOption::kReuseAddr) {
-    server_.set_thread_num(thread_num);
-    server_.set_conn_user_callback([this](const ConnPtr& conn) {
-      connection_count_++;
-      std::cout << "New connection from "
-                << conn->remote_addr_and_port().first << ":"
-                << conn->remote_addr_and_port().second
-                << " (Total connections: " << connection_count_ << ")" << std::endl;
+  server.set_thread_num(poll_threads);
+  server.set_conn_user_callback([](cxpnet::ConnPtr conn) {
+    std::cout << "client connected: " << conn->remote_addr_and_port().first
+              << ":" << conn->remote_addr_and_port().second << std::endl;
 
-      conn->set_conn_user_callbacks(
-          [this, conn](Buffer* buffer) {
-            on_message_(conn, buffer);
-          },
-          [this](int err) {
-            on_close_(err);
-          });
+    conn->set_message_callback([conn](std::string_view data) {
+      conn->send(data);
     });
+    conn->set_close_callback([](int err) {
+      std::cout << "client closed: " << err << std::endl;
+    });
+  });
+
+  if (!server.start(cxpnet::RunningMode::kOnePollPerThread)) {
+    std::cerr << "failed to start echo server" << std::endl;
+    return 1;
   }
 
-  int start() {
-    if (!server_.start(RunningMode::kOnePollPerThread)) {
-      std::cerr << "Failed to start echo server" << std::endl;
-      return 1;
-    }
-
-    std::cout << "Echo server started, listening on port 9092" << std::endl;
-    server_.run();
-    return 0;
-  }
-
-private:
-  void on_message_(const ConnPtr& conn, Buffer* buffer) {
-    message_count_++;
-    std::string msg(buffer->peek(), buffer->readable_size());
-    std::cout << "msg: " << msg << std::endl;
-    conn->send(msg);
-    buffer->been_read_all();
-  }
-
-  void on_close_(int err) {
-    connection_count_--;
-    std::cout << "Connection closed"
-              << " (Total connections: " << connection_count_ << ")"
-              << " with error: " << err << std::endl;
-  }
-
-  Server                 server_;
-  std::atomic<int>       connection_count_ {0};
-  std::atomic<long long> message_count_ {0};
-};
-
-int main() {
-  EchoServer server("127.0.0.1", 9092, 4);
-  return server.start();
+  std::cout << "echo server listening on " << host << ":" << port << std::endl;
+  server.run();
+  return 0;
 }

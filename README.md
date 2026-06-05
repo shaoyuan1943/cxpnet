@@ -1,93 +1,137 @@
-﻿# cxpnet
-A simple, lightweight, cross-platform reactor network library
+# cxpnet
+
+A simple, lightweight, cross-platform C++20 Reactor network library for Linux epoll and macOS kqueue.
 
 ## Project Structure
 
-- `cxpnet/` Library code.
-- `examples/` Use examples.
-- `build_linux.sh` Build script for Linux.
+- `cxpnet/` Library headers and source files.
+- `examples/` User-facing source-built examples.
+- `CMakeLists.txt` Top-level CMake project and install rules.
+- `build_linux.sh` Linux build helper.
+- `build_macos.sh` macOS build helper.
 
-## How To Use
+## Use cxpnet From Source
 
-- Use `#include <cxpnet/cxpnet.h>` or `#include "cxpnet/cxpnet.h"` in user code.
-- Linux builds require a toolchain with `std::format` support.
-- On Ubuntu 20.04, configure CMake with `-DCMAKE_CXX_COMPILER=/usr/bin/g++-13`.
-- `Server` and `Conn` should be treated as one-shot objects by convention. After `shutdown()/close()` or a failed connect/start path, create a new object instead of reusing the old one.
-
-### 1. Use In CMake Project
-
-If your project uses CMake, the simplest way is:
+The recommended source-build usage is to add this repository to your CMake build and link the exported source target:
 
 ```cmake
 add_subdirectory(path/to/cxpnet)
 target_link_libraries(your_target PRIVATE cxpnet::cxpnet)
 ```
 
-Then include:
+Then include the public umbrella header:
 
 ```cpp
 #include <cxpnet/cxpnet.h>
 ```
 
-### 2. Build `libcxpnet.a`
-
-If you want a prebuilt static library, build the `cxpnet` target first.
-
-Release:
+Linux builds require a C++20 toolchain with `std::format` support. On Ubuntu 20.04, configure CMake with:
 
 ```bash
-bash build_linux.sh release clean
-bash build_linux.sh release all
+cmake -S <repo-root-path> -B <repo-root-path>/build/debug \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_CXX_COMPILER=/usr/bin/g++-13
 ```
 
-This generates:
+`Server` and `Conn` are one-shot objects by convention. After `shutdown()/close()` or a failed connect/start path, create a new object instead of reusing the old one.
 
-```text
-build/release/libcxpnet.a
-```
+`SampleClient` is a tiny single-connection client wrapper. For reconnect logic, connection pools, protocol clients, or other advanced behavior, compose directly with `Conn` and `IOEventPoll`.
 
-Debug:
+`Conn` read handling has two callback forms:
+
+- `set_message_callback(std::function<void(std::string_view)>)` is the high-level form. The view is valid only during the callback, and cxpnet consumes all currently readable bytes after the callback returns.
+- `set_message_callback(std::function<void(Buffer*)>)` is the low-level form. Use it for protocol parsers that need partial consumption with `been_read(n)` or `been_read_all()`.
+
+Use `set_close_callback(...)` separately for connection close events.
+
+If you need the project check macro directly, include `#include <cxpnet/check.h>` and use `CXPNET_CHECK(condition, fmt, ...)`. In Debug it asserts; in Release it throws `std::runtime_error`.
+
+## Build
+
+Linux:
 
 ```bash
 bash build_linux.sh debug clean
+bash build_linux.sh debug lib
+bash build_linux.sh debug examples
 bash build_linux.sh debug all
+bash build_linux.sh debug echo_server
 ```
 
-This generates:
-
-```text
-build/debug/libcxpnetd.a
-```
-
-You can also build only the library target:
+macOS:
 
 ```bash
-cmake -S . -B build/release \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_CXX_COMPILER=/usr/bin/g++-13
-cmake --build build/release -j"$(nproc)" --target cxpnet
+bash build_macos.sh debug clean
+bash build_macos.sh debug lib
+bash build_macos.sh debug examples
+bash build_macos.sh debug all
+bash build_macos.sh debug echo_server
 ```
 
-### 3. Minimal Server Example
+The build scripts compile cxpnet and examples from source. They do not copy binaries back into `examples/`.
+
+Example binary paths:
+
+```text
+build/debug/examples/echo_server/echo_serverd
+build/release/examples/echo_server/echo_server
+```
+
+## Examples
+
+All examples link against `cxpnet::cxpnet` from this source tree.
+
+- `echo_server`: minimal TCP echo server using `Server`.
+- `echo_client`: minimal echo client using `SampleClient`.
+- `manual_conn_client`: low-level client using `Conn` and `IOEventPoll` directly.
+- `all_one_thread_server`: echo server driven by repeated `Server::poll()`.
+- `http_server`: minimal HTTP server on top of TCP callbacks.
+- `http_client`: HTTP GET client using `SampleClient`.
+- `file_server`: simple `GET <path>` file transfer server.
+- `file_client`: file transfer client that writes the response body to disk.
+- `timer_poll`: timer callbacks on `IOEventPoll`.
+
+Typical local run:
+
+```bash
+bash build_linux.sh debug examples
+
+./build/debug/examples/echo_server/echo_serverd
+./build/debug/examples/echo_client/echo_clientd 127.0.0.1 9090
+```
+
+HTTP:
+
+```bash
+./build/debug/examples/http_server/http_serverd 127.0.0.1 8080
+./build/debug/examples/http_client/http_clientd 127.0.0.1 8080 /
+```
+
+File transfer:
+
+```bash
+./build/debug/examples/file_server/file_serverd 127.0.0.1 9094 /tmp
+./build/debug/examples/file_client/file_clientd 127.0.0.1 9094 sample.txt downloaded_sample.txt
+```
+
+## Minimal Server Example
 
 ```cpp
 #include <cxpnet/cxpnet.h>
 
-using namespace cxpnet;
+#include <string_view>
 
 int main() {
-  Server server("127.0.0.1", 9090);
+  cxpnet::Server server("127.0.0.1", 9090);
   server.set_thread_num(1);
-  server.set_conn_user_callback([](ConnPtr conn) {
-    conn->set_conn_user_callbacks(
-        [conn](Buffer* buffer) {
-          conn->send(buffer->peek(), buffer->readable_size());
-          buffer->been_read_all();
-        },
-        [](int) {});
+  server.set_conn_user_callback([](cxpnet::ConnPtr conn) {
+    conn->set_message_callback([conn](std::string_view data) {
+      conn->send(data);
+    });
+    conn->set_close_callback([](int) {});
   });
 
-  if (!server.start(RunningMode::kOnePollPerThread)) {
+  if (!server.start(cxpnet::RunningMode::kOnePollPerThread)) {
     return 1;
   }
 
@@ -96,9 +140,43 @@ int main() {
 }
 ```
 
+## Minimal SampleClient Example
+
+```cpp
+#include <cxpnet/cxpnet.h>
+
+#include <string_view>
+
+int main() {
+  cxpnet::SampleClient client("127.0.0.1", 9090);
+  client.set_conn_user_callback([&](cxpnet::ConnPtr conn) {
+    conn->set_message_callback([&](std::string_view data) {
+      client.send(data);
+      client.close();
+    });
+    conn->set_close_callback([&](int) {
+      client.close();
+    });
+
+    client.send("hello", 5);
+  });
+
+  client.set_error_user_callback([&](int) {
+    client.close();
+  });
+
+  if (!client.connect()) {
+    return 1;
+  }
+
+  client.run();
+  return 0;
+}
+```
+
 ## Runtime Tuning
 
-The following recommendations come from local loopback benchmarks on `WSL2 Ubuntu 20.04` with `g++-13` and should be treated as tuning guidance, not as a hard rule for every deployment.
+The following recommendations come from local loopback benchmarks on WSL2 Ubuntu 20.04 with `g++-13` and should be treated as tuning guidance, not as a hard rule for every deployment.
 
 - Small-packet, high-frequency workloads should start with `1 poll`, then benchmark before increasing `thread_num`.
 - On the local 64B benchmark, `1 poll` was faster than `8 poll` in both drain and echo scenarios:
@@ -113,10 +191,3 @@ Typical starting points:
 
 - Dedicated network thread: `set_thread_num(1)` + `start(RunningMode::kOnePollPerThread)` + `run()`
 - Application-managed main loop: `start(RunningMode::kAllOneThread)` + repeated `poll()`
-
-## How To Add Files
-
-### Add Source Code File
-
-- Create new file(.h or .cc) in `cxpnet/`.
-- Update the top-level `CMakeLists.txt`, add new files to `add_library()`.
