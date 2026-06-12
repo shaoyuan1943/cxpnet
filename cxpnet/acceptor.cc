@@ -7,18 +7,10 @@
 
 namespace cxpnet {
   Acceptor::Acceptor(IOEventPoll* event_poll)
-      : event_poll_ {event_poll}
-      , listen_handle_ {invalid_socket}
-      , channel_ {nullptr}
-      , listening_ {false}
-      , sock_option_ {SocketOption::kNone}
-      , proto_stack_ {ProtocolStack::kIPv4Only}
-      , on_err_func_ {nullptr}
-      , on_conn_func_ {nullptr}
-      , local_addr_storage_ {} {
+      : event_poll_ {event_poll} {
   }
 
-  Acceptor::~Acceptor() { shutdown(); }
+  Acceptor::~Acceptor() { close(); }
 
   void Acceptor::set_listen_addr(const char* addr, uint16_t port,
                                  ProtocolStack proto_stack, int option) {
@@ -27,57 +19,57 @@ namespace cxpnet {
     local_addr_storage_ = Platform::get_sockaddr(addr, port, proto_stack);
   }
 
-  void Acceptor::shutdown() {
+  void Acceptor::close() {
+    State old_state = state_.exchange(State::kClosed, std::memory_order_acq_rel);
+    if (old_state != State::kListening) { return; }
+
     if (event_poll_ == nullptr) {
-      shutdown_local_();
+      close_local_();
       return;
     }
 
     if (event_poll_->is_in_poll_thread()) {
-      shutdown_in_poll_();
+      close_in_poll_();
       return;
     }
 
     if (event_poll_->is_shutdown()) {
-      shutdown_local_();
+      close_local_();
       return;
     }
 
-    // Acceptor is expected to be shut down before its owner poll stops.
+    // Acceptor is expected to be closed before its owner poll stops.
     auto done   = std::make_shared<std::promise<void>>();
     auto future = done->get_future();
 
     event_poll_->run_in_poll([this, done]() {
-      shutdown_in_poll_();
+      close_in_poll_();
       done->set_value();
     });
 
     future.get();
   }
 
-  void Acceptor::shutdown_local_() {
+  void Acceptor::close_local_() {
     channel_.reset();
 
     if (listen_handle_ != invalid_socket) {
       Platform::close_handle(listen_handle_);
       listen_handle_ = invalid_socket;
     }
-
-    listening_ = false;
   }
 
-  void Acceptor::shutdown_in_poll_() {
+  void Acceptor::close_in_poll_() {
     if (channel_) {
       channel_->unregister();
-      channel_.reset();
+      auto old_channel = std::shared_ptr<Channel>(channel_.release());
+      event_poll_->run_later([old_channel]() {});
     }
 
     if (listen_handle_ != invalid_socket) {
       Platform::close_handle(listen_handle_);
       listen_handle_ = invalid_socket;
     }
-
-    listening_ = false;
   }
 
   bool Acceptor::listen() {
@@ -86,15 +78,19 @@ namespace cxpnet {
     listen_handle_ = Platform::listen(local_addr_storage_, proto_stack_, sock_option_);
     if (listen_handle_ == invalid_socket) { return false; }
 
-    listening_ = true;
-    channel_   = std::make_unique<Channel>(event_poll_, listen_handle_);
+    channel_ = std::make_unique<Channel>(event_poll_, listen_handle_);
     channel_->set_read_callback(std::bind(&Acceptor::handle_read_, this));
     channel_->add_read_event();
 
+    set_state_(State::kListening);
     return true;
   }
 
   void Acceptor::handle_read_() {
+    if (get_state_() != State::kListening || listen_handle_ == invalid_socket) {
+      return;
+    }
+
     int err = Platform::accept(listen_handle_, accepted_handles_);
     if (err != 0) {
       if (on_err_func_ != nullptr) { on_err_func_(err); }

@@ -47,24 +47,25 @@ namespace cxpnet {
     explicit TimerManager(Closure wakeup_func = nullptr);
     ~TimerManager();
 
-    Timer::TimerID add_timer(uint32_t delay_ms, Timer::Callback cb);
-    void           cancel_timer(Timer::TimerID id);
-    void           shutdown();
-    uint32_t       next_timeout_ms(uint32_t default_timeout_ms);
-    void           run_expired();
-  private:
+    Timer::TimerID               add_timer(uint32_t delay_ms, Timer::Callback cb);
+    void                         cancel_timer(Timer::TimerID id);
+    void                         shutdown();
+    uint32_t                     next_timeout_ms(uint32_t default_timeout_ms);
+    void                         run_expired();
     std::vector<Timer::Callback> take_expired_callbacks_();
+  private:
+    using TimePoint          = std::chrono::steady_clock::time_point;
+    using ScheduleMap        = std::multimap<TimePoint, Timer::TimerID>;
+    using TimersMap          = std::unordered_map<Timer::TimerID, std::unique_ptr<Timer>>;
+    using ScheduledTimersMap = std::unordered_map<Timer::TimerID, ScheduleMap::iterator>;
 
-    using TimePoint   = std::chrono::steady_clock::time_point;
-    using ScheduleMap = std::multimap<TimePoint, Timer::TimerID>;
-
-    std::unordered_map<Timer::TimerID, std::unique_ptr<Timer>> timers_;
-    std::unordered_map<Timer::TimerID, ScheduleMap::iterator>  scheduled_timers_;
-    ScheduleMap                                                schedule_;
-    std::mutex                                                 mutex_;
-    std::atomic_bool                                           running_ {true};
-    Timer::TimerID                                             next_id_ {1};
-    Closure                                                    wakeup_func_;
+    TimersMap          timers_;
+    ScheduledTimersMap scheduled_timers_;
+    ScheduleMap        schedule_;
+    std::mutex         mutex_;
+    std::atomic_bool   running_ {true};
+    Timer::TimerID     next_id_ {1};
+    Closure            wakeup_func_ {nullptr};
   };
 
 } // namespace cxpnet

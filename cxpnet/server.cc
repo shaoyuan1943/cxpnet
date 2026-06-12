@@ -6,7 +6,6 @@
 #include "poll_thread_pool.h"
 #include "sock.h"
 
-#include <chrono>
 #include <format>
 #include <thread>
 
@@ -23,89 +22,51 @@ namespace cxpnet {
   }
 
   Server::~Server() {
-    shutdown();
-    join_closing_thread_();
+    close();
+    wait_until_closed_();
   }
 
   void Server::shutdown() {
-    if (!start_close_(true)) { return; }
+    if (!try_enter_closing_()) { return; }
 
-    if (running_mode_ == RunningMode::kAllOneThread) {
-      all_one_thread_close_();
-      return;
+    if (acceptor_) { acceptor_->close(); }
+
+    for (auto& conn : snapshot_connections_()) {
+      conn->set_graceful_close_timeout(graceful_close_timeout_ms_);
+      conn->shutdown();
     }
 
-    if (running_mode_ == RunningMode::kOnePollPerThread && is_in_managed_poll_thread_()) {
-      start_close_thread_([this]() { do_close_(true); });
-      return;
-    }
-
-    do_close_(true);
+    try_finish_close_();
   }
 
   void Server::close() {
-    if (!start_close_(false)) {
-      try_finish_all_one_thread_close_();
-      return;
+    if (get_state_() == State::kClosed) { return; }
+
+    bool entered_closing = try_enter_closing_();
+    if (!entered_closing) {
+      // 是否是先 shutdown 再 close
+      if (get_state_() != State::kClosing) { return; }
     }
 
-    if (running_mode_ == RunningMode::kOnePollPerThread && is_in_managed_poll_thread_()) {
-      start_close_thread_([this]() { do_close_(false); });
-      return;
-    }
+    if (acceptor_) { acceptor_->close(); }
 
-    do_close_(false);
-  }
-
-  // false  false   没启动/已完全停止
-  // true   false   运行中，进入停止
-  // false  true    停止中，升级到强制停止
-  // true   true    异常状态，进入停止
-  bool Server::start_close_(bool graceful) {
-    const bool is_started_or_stopping = ACQUIRE_LOAD(started_) || ACQUIRE_LOAD(stopping_);
-    if (!is_started_or_stopping) { return false; }
-
-    bool expected = false;
-    if (!stopping_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-      if (!graceful) { RELEASE_STORE(force_stop_requested_, true); }
-      return false;
-    }
-
-    if (!graceful) { RELEASE_STORE(force_stop_requested_, true); }
-    RELEASE_STORE(started_, false);
-    return true;
-  }
-
-  void Server::do_close_(bool graceful) {
-    if (acceptor_) { acceptor_->shutdown(); }
-
-    if (graceful) {
-      for (auto& conn : collect_connections_(false)) {
-        conn->shutdown();
-      }
-
-      if (graceful_close_timeout_ms_ > 0) {
-        auto deadline = std::chrono::steady_clock::now() +
-                        std::chrono::milliseconds(graceful_close_timeout_ms_);
-        while (std::chrono::steady_clock::now() < deadline) {
-          if (connection_count() == 0) { break; }
-          if (ACQUIRE_LOAD(force_stop_requested_)) { break; }
-          std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-      }
-    }
-
-    for (auto& conn : collect_connections_(true)) {
+    for (auto& conn : snapshot_connections_()) {
       conn->close();
     }
 
-    close_polls_();
-
-    RELEASE_STORE(force_stop_requested_, false);
-    RELEASE_STORE(stopping_, false);
+    try_finish_close_();
   }
 
-  std::vector<ConnPtr> Server::collect_connections_(bool clear_after_collect) {
+  bool Server::try_enter_closing_() {
+    State state = get_state_();
+    if (state == State::kCreated || state == State::kClosed) { return false; }
+    if (state == State::kClosing) { return false; }
+
+    State expected = State::kRunning;
+    return state_.compare_exchange_strong(expected, State::kClosing, std::memory_order_acq_rel);
+  }
+
+  std::vector<ConnPtr> Server::snapshot_connections_() {
     std::vector<ConnPtr>        conns_snapshot;
     std::lock_guard<std::mutex> lock(conns_mutex_);
 
@@ -114,50 +75,45 @@ namespace cxpnet {
       if (conn) { conns_snapshot.push_back(conn); }
     }
 
-    if (clear_after_collect) { conns_.clear(); }
     return conns_snapshot;
   }
 
-  void Server::all_one_thread_close_() {
-    if (main_poll_ && !main_poll_->is_in_poll_thread()) {
-      CXPNET_CHECK(false, "kAllOneThread shutdown must be called on the poll thread");
-    }
+  void Server::try_finish_close_() {
+    if (ACQUIRE_LOAD(state_) != State::kClosing) { return; }
+    if (connection_count() != 0) { return; }
 
-    graceful_close_deadline_ = (graceful_close_timeout_ms_ > 0)
-                                   ? (std::chrono::steady_clock::now() + std::chrono::milliseconds(graceful_close_timeout_ms_))
-                                   : std::chrono::steady_clock::time_point::max();
-
-    if (acceptor_) { acceptor_->shutdown(); }
-
-    for (auto& conn : collect_connections_(false)) {
-      conn->shutdown();
-    }
-
-    try_finish_all_one_thread_close_();
-  }
-
-  void Server::try_finish_all_one_thread_close_() {
-    if (running_mode_ != RunningMode::kAllOneThread) { return; }
-    if (!ACQUIRE_LOAD(stopping_)) { return; }
-
-    if (!ACQUIRE_LOAD(force_stop_requested_) && connection_count() != 0 &&
-        std::chrono::steady_clock::now() < graceful_close_deadline_) {
+    bool expected = false;
+    if (!close_polls_flag_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
       return;
     }
 
-    for (auto& conn : collect_connections_(true)) {
-      conn->close();
+    if (is_in_sub_poll_thread_()) {
+      start_close_thread_([this]() { finish_close_(); });
+      return;
     }
 
-    close_polls_();
-    RELEASE_STORE(force_stop_requested_, false);
-    RELEASE_STORE(stopping_, false);
-    RELEASE_STORE(started_, false);
+    finish_close_();
   }
 
-  bool Server::is_in_managed_poll_thread_() const {
-    if (main_poll_ && main_poll_->is_in_poll_thread()) { return true; }
+  void Server::finish_close_() {
+    close_polls_();
+    RELEASE_STORE(state_, State::kClosed);
+  }
 
+  void Server::wait_until_closed_() {
+    while (ACQUIRE_LOAD(state_) == State::kClosing) {
+      if (running_mode_ == RunningMode::kAllOneThread) {
+        poll();
+        continue;
+      }
+
+      std::this_thread::yield();
+    }
+
+    join_closing_thread_();
+  }
+
+  bool Server::is_in_sub_poll_thread_() const {
     for (const auto& poll : sub_polls_) {
       if (poll && poll->is_in_poll_thread()) { return true; }
     }
@@ -192,20 +148,19 @@ namespace cxpnet {
   }
 
   bool Server::start(RunningMode mode) {
-    bool expected = false;
-    if (!started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+    State expected = State::kCreated;
+    if (!state_.compare_exchange_strong(expected, State::kRunning, std::memory_order_acq_rel)) {
       return false;
     }
 
-    RELEASE_STORE(stopping_, false);
-    RELEASE_STORE(force_stop_requested_, false);
+    RELEASE_STORE(close_polls_flag_, false);
 
     running_mode_ = mode;
 
     constexpr int kMaxThreadNum = 1024;
     if (running_mode_ == RunningMode::kOnePollPerThread) {
       if (thread_num_ <= 0 || thread_num_ > kMaxThreadNum) {
-        RELEASE_STORE(started_, false);
+        RELEASE_STORE(state_, State::kClosed);
         return false;
       }
 
@@ -228,7 +183,7 @@ namespace cxpnet {
 
     if (!acceptor_->listen()) {
       close_polls_();
-      RELEASE_STORE(started_, false);
+      RELEASE_STORE(state_, State::kClosed);
       return false;
     }
 
@@ -238,23 +193,27 @@ namespace cxpnet {
   void Server::run() {
     CXPNET_CHECK(running_mode_ == RunningMode::kOnePollPerThread, "");
 
-    if (!ACQUIRE_LOAD(started_)) { return; }
+    if (ACQUIRE_LOAD(state_) != State::kRunning) { return; }
     main_poll_->run();
   }
 
   void Server::poll() {
     CXPNET_CHECK(running_mode_ == RunningMode::kAllOneThread, "");
 
-    const bool is_started_or_stopping = ACQUIRE_LOAD(started_) || ACQUIRE_LOAD(stopping_);
-    if (!is_started_or_stopping) { return; }
+    State state = ACQUIRE_LOAD(state_);
+    if (state == State::kCreated || state == State::kClosed) { return; }
 
     main_poll_->poll();
-    try_finish_all_one_thread_close_();
+    try_finish_close_();
   }
 
   void Server::on_conn_close_(int handle) {
-    std::lock_guard<std::mutex> lock(conns_mutex_);
-    conns_.erase(handle);
+    {
+      std::lock_guard<std::mutex> lock(conns_mutex_);
+      conns_.erase(handle);
+    }
+
+    try_finish_close_();
   }
 
   void Server::on_acceptor_error_(int err) {
@@ -276,7 +235,7 @@ namespace cxpnet {
   void Server::on_new_connection_(int handle, struct sockaddr_storage addr_storage) {
     if (handle == invalid_socket) { return; }
 
-    if (!ACQUIRE_LOAD(started_) || ACQUIRE_LOAD(stopping_)) {
+    if (ACQUIRE_LOAD(state_) != State::kRunning) {
       Platform::close_handle(handle);
       return;
     }
@@ -332,7 +291,7 @@ namespace cxpnet {
 
     auto on_conn_func = on_conn_func_;
     event_poll->run_in_poll([this, handle, conn, on_conn_func]() {
-      if (!ACQUIRE_LOAD(started_) || ACQUIRE_LOAD(stopping_)) {
+      if (ACQUIRE_LOAD(state_) != State::kRunning) {
         on_conn_close_(handle);
         if (conn->handle_ != invalid_socket) {
           Platform::close_handle(conn->handle_);

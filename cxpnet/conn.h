@@ -18,11 +18,19 @@ namespace cxpnet {
 
   class Conn : public NonCopyable
       , public std::enable_shared_from_this<Conn> {
+  private:
+    enum class State {
+      kCreated,
+      kConnecting,
+      kConnected,
+      kClosing,
+      kClosed,
+    };
   public:
     Conn(IOEventPoll* event_poll, int handle = invalid_socket);
     ~Conn();
 
-    void connect(const char* addr, uint16_t port,
+    bool connect(const char* addr, uint16_t port,
                  std::function<void(ConnPtr)> on_connected,
                  std::function<void(int)>     on_connect_error = nullptr);
 
@@ -35,7 +43,7 @@ namespace cxpnet {
       return std::make_pair(addr_, port_);
     }
     int  native_handle() const { return handle_; }
-    bool connected() const { return get_state_() == State::kConnected; }
+    bool is_connected() const { return get_state_() == State::kConnected; }
 
     void set_message_callback(std::function<void(std::string_view)> message_func) {
       if (!message_func) {
@@ -99,10 +107,10 @@ namespace cxpnet {
     void handle_close_event_(int err);
     void send_in_poll_thread_(const char* data, size_t size);
 
-    void  set_state_(State s) { RELEASE_STORE(state_, static_cast<int>(s)); }
-    State get_state_() const { return static_cast<State>(ACQUIRE_LOAD(state_)); }
+    void  set_state_(State s) { RELEASE_STORE(state_, s); }
+    State get_state_() const { return ACQUIRE_LOAD(state_); }
     bool  can_read_() const {
-      return get_state_() == State::kConnected || get_state_() == State::kDisconnecting;
+      return get_state_() == State::kConnected || get_state_() == State::kClosing;
     }
     void set_internal_close_callback_(Closure&& close_callback) { internal_close_callback_ = std::move(close_callback); }
     void set_remote_addr_(const char* addr, uint16_t port) {
@@ -111,11 +119,10 @@ namespace cxpnet {
     }
 
     // 关闭流程
-    void shutdown_in_poll_();
-    void cleanup_(int err);
-    void do_cleanup_(int err);
-    void start_graceful_close_timeout_();
-    void cancel_graceful_close_timeout_();
+    void enter_closing_in_poll_();
+    void cancel_closing_timer_();
+    void do_close_in_poll_(int err);
+    void finish_close_(int err);
 
     void start_connect_in_poll_(const char* addr, uint16_t port);
     void handle_connect_event_();
@@ -123,26 +130,24 @@ namespace cxpnet {
   private:
     IOEventPoll*                 event_poll_;
     int                          handle_;
-    std::unique_ptr<Channel>     channel_;
-    std::function<void(Buffer*)> on_message_func_;
-    std::function<void(int)>     on_close_func_;
-    Closure                      internal_close_callback_;
-    std::function<void(int)>     watermark_func_;
-    uint                         high_watermark_;
-    uint                         low_watermark_;
+    std::unique_ptr<Channel>     channel_ {nullptr};
+    std::function<void(Buffer*)> on_message_func_ {nullptr};
+    std::function<void(int)>     on_close_func_ {nullptr};
+    Closure                      internal_close_callback_ {nullptr};
+    std::function<void(int)>     watermark_func_ {nullptr};
+    uint                         high_watermark_ {1024 * 1024};
+    uint                         low_watermark_ {256 * 1024};
     bool                         high_watermark_warning_;
-    char                         addr_[INET6_ADDRSTRLEN];
-    uint16_t                     port_;
-    std::atomic<int>             state_;
-    std::unique_ptr<Buffer>      read_buffer_;
-    std::unique_ptr<Buffer>      write_buffer_;
+    char                         addr_[INET6_ADDRSTRLEN] {0};
+    uint16_t                     port_ {0};
+    std::atomic<State>           state_ {State::kCreated};
+    std::unique_ptr<Buffer>      read_buffer_ {nullptr};
+    std::unique_ptr<Buffer>      write_buffer_ {nullptr};
 
-    uint32_t          graceful_close_timeout_ms_ = 5000; // 默认 5 秒
-    Timer::TimerID    close_timer_id_            = 0;
-    std::atomic<bool> cleanup_done_ {false};
-
-    std::function<void(ConnPtr)> on_connected_func_;
-    std::function<void(int)>     on_connect_error_func_;
+    uint32_t                     graceful_close_timeout_ms_ {500};
+    Timer::TimerID               close_timer_id_ {0};
+    std::function<void(ConnPtr)> on_connected_func_ {nullptr};
+    std::function<void(int)>     on_connect_error_func_ {nullptr};
   };
 } // namespace cxpnet
 

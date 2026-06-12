@@ -11,40 +11,23 @@
 namespace cxpnet {
   Conn::Conn(IOEventPoll* event_poll, int handle)
       : event_poll_ {event_poll}
-      , handle_ {handle}
-      , channel_ {nullptr}
-      , on_message_func_ {nullptr}
-      , on_close_func_ {nullptr}
-      , internal_close_callback_ {nullptr}
-      , watermark_func_ {nullptr}
-      , high_watermark_ {1024 * 1024}
-      , low_watermark_ {256 * 1024}
-      , high_watermark_warning_ {false}
-      , addr_ {0}
-      , port_ {0}
-      , state_ {static_cast<int>(State::kDisconnected)}
-      , read_buffer_ {nullptr}
-      , write_buffer_ {nullptr}
-      , on_connected_func_ {nullptr}
-      , on_connect_error_func_ {nullptr} {
+      , handle_ {handle} {
   }
 
   Conn::~Conn() {
-    cancel_graceful_close_timeout_();
+    cancel_closing_timer_();
     if (handle_ != invalid_socket) {
       Platform::close_handle(handle_);
     }
   }
 
-  void Conn::connect(const char* addr, uint16_t port,
+  bool Conn::connect(const char* addr, uint16_t port,
                      std::function<void(ConnPtr)> on_connected,
                      std::function<void(int)>     on_connect_error) {
-    if (get_state_() != State::kDisconnected) {
-      if (on_connect_error) { on_connect_error(EALREADY); }
-      return;
+    State expected = State::kCreated;
+    if (!state_.compare_exchange_strong(expected, State::kConnecting, std::memory_order_acq_rel)) {
+      return false;
     }
-
-    RELEASE_STORE(cleanup_done_, false);
 
     on_connected_func_     = std::move(on_connected);
     on_connect_error_func_ = std::move(on_connect_error);
@@ -55,21 +38,22 @@ namespace cxpnet {
 
     if (event_poll_->is_in_poll_thread()) {
       start_connect_in_poll_(addr, port);
-      return;
+      return true;
     }
 
     auto self = shared_from_this();
     event_poll_->run_in_poll([self, addr_str = std::string(addr), port]() {
       self->start_connect_in_poll_(addr_str.c_str(), port);
     });
+
+    return true;
   }
 
   bool Conn::connect_sync(const char* addr, uint16_t port) {
-    if (get_state_() != State::kDisconnected) {
+    State expected = State::kCreated;
+    if (!state_.compare_exchange_strong(expected, State::kConnecting, std::memory_order_acq_rel)) {
       return false;
     }
-
-    RELEASE_STORE(cleanup_done_, false);
 
     strncpy(addr_, addr, INET6_ADDRSTRLEN - 1);
     addr_[INET6_ADDRSTRLEN - 1] = '\0';
@@ -77,37 +61,50 @@ namespace cxpnet {
 
     IPType        ip_type     = ip_address_type(std::string(addr));
     ProtocolStack proto_stack = (ip_type == IPType::kIPv4) ? ProtocolStack::kIPv4Only : ProtocolStack::kIPv6Only;
-    if (ip_type == IPType::kInvalid) { return false; }
+    if (ip_type == IPType::kInvalid) {
+      set_state_(State::kClosed);
+      return false;
+    }
 
     struct sockaddr_storage addr_storage = Platform::get_sockaddr(addr, port, proto_stack);
-    if (addr_storage.ss_family == 0) { return false; }
+    if (addr_storage.ss_family == 0) {
+      set_state_(State::kClosed);
+      return false;
+    }
 
     int handle = Platform::connect(addr_storage, false);
-    if (handle < 0) { return false; }
+    if (handle < 0) {
+      set_state_(State::kClosed);
+      return false;
+    }
 
     handle_ = handle;
     start_();
-    return connected();
+    return is_connected();
   }
 
   void Conn::start_connect_in_poll_(const char* addr, uint16_t port) {
     CXPNET_CHECK(event_poll_->is_in_poll_thread(), "Must in IO thread");
+    if (get_state_() != State::kConnecting) { return; }
 
     IPType        ip_type     = ip_address_type(std::string(addr));
     ProtocolStack proto_stack = (ip_type == IPType::kIPv4) ? ProtocolStack::kIPv4Only : ProtocolStack::kIPv6Only;
     if (ip_type == IPType::kInvalid) {
+      set_state_(State::kClosed);
       if (on_connect_error_func_) { on_connect_error_func_(EINVAL); }
       return;
     }
 
     struct sockaddr_storage addr_storage = Platform::get_sockaddr(addr, port, proto_stack);
     if (addr_storage.ss_family == 0) {
+      set_state_(State::kClosed);
       if (on_connect_error_func_) { on_connect_error_func_(EINVAL); }
       return;
     }
 
     int handle = Platform::connect(addr_storage);
     if (handle < 0) {
+      set_state_(State::kClosed);
       if (on_connect_error_func_) { on_connect_error_func_(Platform::get_last_error()); }
       return;
     }
@@ -149,7 +146,7 @@ namespace cxpnet {
         handle_ = invalid_socket;
       }
 
-      set_state_(State::kDisconnected);
+      set_state_(State::kClosed);
       if (on_connect_error_func_) { on_connect_error_func_(err); }
       return;
     }
@@ -160,68 +157,80 @@ namespace cxpnet {
     if (on_connected_func_) { on_connected_func_(shared_from_this()); }
   }
 
+  // 可能跨线程调用，shutdown 里面不要访问 handle_ 或 channel_
   void Conn::shutdown() {
-    if (!connected()) { return; }
-    if (handle_ == invalid_socket) { return; }
+    if (!is_connected()) { return; }
+    if (get_state_() == State::kClosed) { return; }
 
     if (event_poll_->is_in_poll_thread()) {
-      shutdown_in_poll_();
+      enter_closing_in_poll_();
       return;
     }
 
     auto self = shared_from_this();
-    event_poll_->run_in_poll([self]() { self->shutdown_in_poll_(); });
+    event_poll_->run_in_poll([self]() { self->enter_closing_in_poll_(); });
   }
 
-  void Conn::shutdown_in_poll_() {
+  void Conn::enter_closing_in_poll_() {
     CXPNET_CHECK(event_poll_->is_in_poll_thread(), "Must in IO thread");
 
-    if (!connected()) { return; }
+    if (!is_connected()) { return; }
     if (handle_ == invalid_socket) { return; }
 
-    set_state_(State::kDisconnecting);
+    set_state_(State::kClosing);
 
     if (!write_buffer_ || write_buffer_->readable_size() == 0) {
       if (channel_) { channel_->remove_write_event(); }
       Platform::shut_wr(handle_);
     }
 
+    // closing timer
     if (graceful_close_timeout_ms_ > 0 && event_poll_ && event_poll_->timer_manager()) {
-      start_graceful_close_timeout_();
+      if (close_timer_id_ != 0) { return; }
+      // 不要使用shared_ptr，否则会导致 Conn 残活在计时器里面
+      std::weak_ptr<Conn> weak_self = shared_from_this();
+      close_timer_id_               = event_poll_->timer_manager()->add_timer(
+          graceful_close_timeout_ms_,
+          [weak_self]() {
+            if (auto self = weak_self.lock()) {
+              self->event_poll_->run_in_poll([self]() {
+                self->do_close_in_poll_(ETIMEDOUT);
+              });
+            }
+          });
     }
   }
 
   void Conn::close() {
-    if (connected()) { return; }
+    // 支持先 shutdown 后再 close：从优雅退出升级到强制退出
+    State state = get_state_();
+    if (state != State::kConnected && state != State::kClosing) { return; }
 
     if (event_poll_->is_in_poll_thread()) {
-      cleanup_(0);
+      do_close_in_poll_(0);
       return;
     }
 
     auto self = shared_from_this();
     event_poll_->run_in_poll([self]() {
-      self->cleanup_(0);
+      self->do_close_in_poll_(0);
     });
   }
 
-  void Conn::cleanup_(int err) {
+  void Conn::do_close_in_poll_(int err) {
     CXPNET_CHECK(event_poll_->is_in_poll_thread(), "Must in IO thread");
 
-    bool expected = false;
-    if (!cleanup_done_.compare_exchange_strong(expected, true)) { return; }
+    State old_state = state_.exchange(State::kClosed, std::memory_order_acq_rel);
+    if (old_state == State::kClosed) { return; }
 
-    cancel_graceful_close_timeout_();
+    cancel_closing_timer_();
 
-    if (get_state_() == State::kConnected && handle_ != invalid_socket) {
-      Platform::shut_wr(handle_);
-    }
+    if (handle_ == invalid_socket && !channel_) { return; }
 
-    set_state_(State::kDisconnecting);
-    do_cleanup_(err);
+    finish_close_(err);
   }
 
-  void Conn::do_cleanup_(int err) {
+  void Conn::finish_close_(int err) {
     if (channel_) { channel_->unregister(); }
 
     if (handle_ != invalid_socket) {
@@ -240,26 +249,9 @@ namespace cxpnet {
       auto     channel_shared = std::shared_ptr<Channel>(raw_channel);
       event_poll_->run_later([channel_shared]() {});
     }
-
-    set_state_(State::kDisconnected);
   }
 
-  void Conn::start_graceful_close_timeout_() {
-    if (close_timer_id_ != 0) { return; }
-
-    std::weak_ptr<Conn> weak_self = shared_from_this();
-    close_timer_id_               = event_poll_->timer_manager()->add_timer(
-        graceful_close_timeout_ms_,
-        [weak_self]() {
-          if (auto self = weak_self.lock()) {
-            self->event_poll_->run_in_poll([self]() {
-              self->cleanup_(ETIMEDOUT);
-            });
-          }
-        });
-  }
-
-  void Conn::cancel_graceful_close_timeout_() {
+  void Conn::cancel_closing_timer_() {
     if (close_timer_id_ != 0) {
       if (event_poll_ && event_poll_->timer_manager()) {
         event_poll_->timer_manager()->cancel_timer(close_timer_id_);
@@ -270,7 +262,7 @@ namespace cxpnet {
   }
 
   void Conn::send(const char* msg, size_t size) {
-    if (!connected() || msg == nullptr || size == 0) { return; }
+    if (!is_connected() || msg == nullptr || size == 0) { return; }
 
     if (event_poll_->is_in_poll_thread()) {
       send_in_poll_thread_(msg, size);
@@ -289,16 +281,12 @@ namespace cxpnet {
 
   std::string Conn::state_string() {
     switch (get_state_()) {
-    case State::kDisconnected:
-      return "Disconnected";
-    case State::kConnecting:
-      return "Connecting";
-    case State::kConnected:
-      return "Connected";
-    case State::kDisconnecting:
-      return "Disconnecting";
-    default:
-      return "Unknown";
+    case State::kCreated: return "Created";
+    case State::kConnecting: return "Connecting";
+    case State::kConnected: return "Connected";
+    case State::kClosing: return "Closing";
+    case State::kClosed: return "Closed";
+    default: return "Unknown";
     }
   }
 
@@ -306,9 +294,7 @@ namespace cxpnet {
     CXPNET_CHECK(event_poll_->is_in_poll_thread(), "Must in IO thread");
 
     if (handle_ == invalid_socket) { return; }
-    if (connected()) { return; }
-
-    RELEASE_STORE(cleanup_done_, false);
+    if (is_connected()) { return; }
 
     if (!read_buffer_) { read_buffer_ = std::make_unique<Buffer>(); }
     if (!write_buffer_) { write_buffer_ = std::make_unique<Buffer>(); }
@@ -393,19 +379,19 @@ namespace cxpnet {
     if (write_buffer_->readable_size() == 0) {
       write_buffer_->clear();
       channel_->remove_write_event();
-      if (get_state_() == State::kDisconnecting) { Platform::shut_wr(handle_); }
+      if (get_state_() == State::kClosing) { Platform::shut_wr(handle_); }
     }
   }
 
   void Conn::handle_close_event_(int err) {
-    if (get_state_() == State::kDisconnected) { return; }
-    cleanup_(err);
+    if (get_state_() == State::kClosed) { return; }
+    do_close_in_poll_(err);
   }
 
   void Conn::send_in_poll_thread_(const char* data, size_t size) {
     CXPNET_CHECK(event_poll_->is_in_poll_thread(), "Must in IO thread");
 
-    if (!connected() || write_buffer_ == nullptr || channel_ == nullptr) {
+    if (!is_connected() || write_buffer_ == nullptr || channel_ == nullptr) {
       return;
     }
 

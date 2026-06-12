@@ -29,7 +29,7 @@ namespace cxpnet {
     // epoll 事件 → 统一事件
     int from_epoll_events(uint32_t events);
   private:
-    int                             epoll_fd_ = -1;
+    int                             epoll_fd_ {-1};
     std::vector<struct epoll_event> events_;
   };
 

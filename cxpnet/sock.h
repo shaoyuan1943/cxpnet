@@ -52,7 +52,6 @@ namespace cxpnet {
   enum class ProtocolStack { kIPv4Only, kIPv6Only, kDualStack };
   enum class IPType { kInvalid, kIPv4, kIPv6 };
   enum class RunningMode { kOnePollPerThread, kAllOneThread };
-  enum class State { kDisconnected, kConnecting, kConnected, kDisconnecting };
   // clang-format on
 
   inline IPType ip_address_type(const std::string& address) {

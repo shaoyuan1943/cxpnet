@@ -17,8 +17,7 @@
 #include <vector>
 
 namespace cxpnet {
-  IOEventPoll::IOEventPoll()
-      : on_err_func_ {nullptr} {
+  IOEventPoll::IOEventPoll() {
     thread_id_ = std::this_thread::get_id();
 
 #if CXP_PLATFORM_LINUX
@@ -29,8 +28,7 @@ namespace cxpnet {
 
     wakeup_handle_  = Platform::create_wakeup_fd();
     wakeup_read_fd_ = Platform::get_wakeup_read_fd(wakeup_handle_);
-
-    timer_manager_ = std::make_unique<TimerManager>([this]() {
+    timer_manager_  = std::make_unique<TimerManager>([this]() {
       notify_wakeup_();
     });
 
@@ -62,27 +60,13 @@ namespace cxpnet {
 
   void IOEventPoll::run() {
     thread_id_ = std::this_thread::get_id();
-    while (true) {
-      if (ACQUIRE_LOAD(shut_)) {
-        std::vector<Closure> tmp_tasks;
-        {
-          std::lock_guard<std::mutex> lock(mutex_);
-          if (tasks_.empty()) {
-            break;
-          }
 
-          tasks_.swap(tmp_tasks);
-        }
-
-        for (auto&& func : tmp_tasks) {
-          func();
-        }
-
-        continue;
-      }
-
+    while (!ACQUIRE_LOAD(shut_)) {
       uint32_t poll_timeout = timer_manager_->next_timeout_ms(kMaxIdlePollTimeoutMS);
       poll_(poll_timeout);
+    }
+
+    while (run_pending_tasks_()) {
     }
   }
 
@@ -123,13 +107,32 @@ namespace cxpnet {
   void IOEventPoll::notify_wakeup_() { Platform::wakeup_write(wakeup_handle_); }
   void IOEventPoll::handle_wakeup_() { Platform::wakeup_read(wakeup_read_fd_); }
 
+  bool IOEventPoll::run_pending_tasks_() {
+    std::vector<Closure> tmp_tasks;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (tasks_.empty()) { return false; }
+      tasks_.swap(tmp_tasks);
+    }
+
+    for (auto&& func : tmp_tasks) {
+      func();
+    }
+
+    return true;
+  }
+
+  void IOEventPoll::run_expired_timers_() {
+    if (timer_manager_) {
+      timer_manager_->run_expired();
+    }
+  }
+
   void IOEventPoll::poll_(uint32_t poll_timeout) {
     int result = 0;
     int err    = 0;
 
-    if (timer_manager_) {
-      timer_manager_->run_expired();
-    }
+    run_expired_timers_();
 
     active_channels_.clear();
     result = poller_->poll(poll_timeout, active_channels_);
@@ -141,19 +144,8 @@ namespace cxpnet {
       channel->handle_event();
     }
 
-    std::vector<Closure> tmp_tasks;
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      tasks_.swap(tmp_tasks);
-    }
-
-    for (auto&& func : tmp_tasks) {
-      func();
-    }
-
-    if (timer_manager_) {
-      timer_manager_->run_expired();
-    }
+    run_pending_tasks_();
+    run_expired_timers_();
 
     if (err != 0 && err != EINTR && on_err_func_ != nullptr) {
       on_err_func_(this, err);
