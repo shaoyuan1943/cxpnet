@@ -48,6 +48,11 @@ build/*.*
 .vscode/*
 .vscode/*.*
 
+# Local agent and IDE files
+.claude/
+.idea/
+benckmark/
+
 **/CMakeCache.txt
 **/CMakeFiles/
 **/cmake_install.cmake
