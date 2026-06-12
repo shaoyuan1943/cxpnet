@@ -1,31 +1,31 @@
 # cxpnet
 
-A simple, lightweight, cross-platform C++20 Reactor network library for Linux epoll and macOS kqueue.
+一个简单、轻量、跨平台的 C++20 Reactor 网络库，Linux 使用 epoll，macOS 使用 kqueue。
 
-## Project Structure
+## 项目结构
 
-- `cxpnet/` Library headers and source files.
-- `examples/` User-facing source-built examples.
-- `CMakeLists.txt` Top-level CMake project and install rules.
-- `build_linux.sh` Linux build helper.
-- `build_macos.sh` macOS build helper.
+- `cxpnet/`：库头文件和源文件。
+- `examples/`：面向用户、从源码构建的示例。
+- `CMakeLists.txt`：顶层 CMake 项目和安装规则。
+- `build_linux.sh`：Linux 构建辅助脚本。
+- `build_macos.sh`：macOS 构建辅助脚本。
 
-## Use cxpnet From Source
+## 从源码使用 cxpnet
 
-The recommended source-build usage is to add this repository to your CMake build and link the exported source target:
+推荐的源码构建方式，是把本仓库加入你的 CMake 构建，并链接导出的源码目标：
 
 ```cmake
 add_subdirectory(path/to/cxpnet)
 target_link_libraries(your_target PRIVATE cxpnet::cxpnet)
 ```
 
-Then include the public umbrella header:
+然后包含公共总入口头文件：
 
 ```cpp
 #include <cxpnet/cxpnet.h>
 ```
 
-Linux builds require a C++20 toolchain with `std::format` support. On Ubuntu 20.04, configure CMake with:
+Linux 构建需要支持 `std::format` 的 C++20 工具链。在 Ubuntu 20.04 上，用下面的方式配置 CMake：
 
 ```bash
 cmake -S <repo-root-path> -B <repo-root-path>/build/debug \
@@ -33,22 +33,22 @@ cmake -S <repo-root-path> -B <repo-root-path>/build/debug \
   -DCMAKE_CXX_COMPILER=/usr/bin/g++-13
 ```
 
-`Server` and `Conn` are one-shot objects by convention. After `shutdown()/close()` or a failed connect/start path, create a new object instead of reusing the old one.
+按约定，`Server` 和 `Conn` 都是一次性对象。调用 `shutdown()/close()` 之后，或者 connect/start 路径失败之后，应创建新对象，不要复用旧对象。
 
-`SampleClient` is a tiny single-connection client wrapper. For reconnect logic, connection pools, protocol clients, or other advanced behavior, compose directly with `Conn` and `IOEventPoll`.
+`SampleClient` 是一个很小的单连接客户端封装。如果需要重连逻辑、连接池、协议客户端或其他高级行为，直接组合使用 `Conn` 和 `IOEventPoll`。
 
-`Conn` read handling has two callback forms:
+`Conn` 的读处理有两种回调形式：
 
-- `set_message_callback(std::function<void(std::string_view)>)` is the high-level form. The view is valid only during the callback, and cxpnet consumes all currently readable bytes after the callback returns.
-- `set_message_callback(std::function<void(Buffer*)>)` is the low-level form. Use it for protocol parsers that need partial consumption with `been_read(n)` or `been_read_all()`.
+- `set_message_callback(std::function<void(std::string_view)>)` 是高级形式。这个 view 只在回调期间有效；回调返回后，cxpnet 会消费当前所有可读字节。
+- `set_message_callback(std::function<void(Buffer*)>)` 是低级形式。适合需要通过 `been_read(n)` 或 `been_read_all()` 做局部消费的协议解析器。
 
-Use `set_close_callback(...)` separately for connection close events.
+连接关闭事件请单独使用 `set_close_callback(...)`。
 
-If you need the project check macro directly, include `#include <cxpnet/check.h>` and use `CXPNET_CHECK(condition, fmt, ...)`. In Debug it asserts; in Release it throws `std::runtime_error`.
+如果需要直接使用项目检查宏，请包含 `#include <cxpnet/check.h>` 并使用 `CXPNET_CHECK(condition, fmt, ...)`。Debug 下它会 assert；Release 下它会抛出 `std::runtime_error`。
 
-## Build
+## 构建
 
-Linux:
+Linux：
 
 ```bash
 bash build_linux.sh debug clean
@@ -58,7 +58,7 @@ bash build_linux.sh debug all
 bash build_linux.sh debug echo_server
 ```
 
-macOS:
+macOS：
 
 ```bash
 bash build_macos.sh debug clean
@@ -68,30 +68,30 @@ bash build_macos.sh debug all
 bash build_macos.sh debug echo_server
 ```
 
-The build scripts compile cxpnet and examples from source. They do not copy binaries back into `examples/`.
+构建脚本会从源码编译 cxpnet 和示例。
 
-Example binary paths:
+示例二进制路径：
 
 ```text
 build/debug/examples/echo_server/echo_serverd
 build/release/examples/echo_server/echo_server
 ```
 
-## Examples
+## 示例
 
-All examples link against `cxpnet::cxpnet` from this source tree.
+所有示例都链接本源码树里的 `cxpnet::cxpnet`。
 
-- `echo_server`: minimal TCP echo server using `Server`.
-- `echo_client`: minimal echo client using `SampleClient`.
-- `manual_conn_client`: low-level client using `Conn` and `IOEventPoll` directly.
-- `all_one_thread_server`: echo server driven by repeated `Server::poll()`.
-- `http_server`: minimal HTTP server on top of TCP callbacks.
-- `http_client`: HTTP GET client using `SampleClient`.
-- `file_server`: simple `GET <path>` file transfer server.
-- `file_client`: file transfer client that writes the response body to disk.
-- `timer_poll`: timer callbacks on `IOEventPoll`.
+- `echo_server`：使用 `Server` 的最小 TCP echo 服务器。
+- `echo_client`：使用 `SampleClient` 的最小 echo 客户端。
+- `manual_conn_client`：直接使用 `Conn` 和 `IOEventPoll` 的低级客户端。
+- `all_one_thread_server`：由重复调用 `Server::poll()` 驱动的 echo 服务器。
+- `http_server`：基于 TCP 回调的最小 HTTP 服务器。
+- `http_client`：使用 `SampleClient` 的 HTTP GET 客户端。
+- `file_server`：简单的 `GET <path>` 文件传输服务器。
+- `file_client`：把响应体写入磁盘的文件传输客户端。
+- `timer_poll`：`IOEventPoll` 上的定时器回调示例。
 
-Typical local run:
+典型本地运行方式：
 
 ```bash
 bash build_linux.sh debug examples
@@ -100,21 +100,21 @@ bash build_linux.sh debug examples
 ./build/debug/examples/echo_client/echo_clientd 127.0.0.1 9090
 ```
 
-HTTP:
+HTTP：
 
 ```bash
 ./build/debug/examples/http_server/http_serverd 127.0.0.1 8080
 ./build/debug/examples/http_client/http_clientd 127.0.0.1 8080 /
 ```
 
-File transfer:
+文件传输：
 
 ```bash
 ./build/debug/examples/file_server/file_serverd 127.0.0.1 9094 /tmp
 ./build/debug/examples/file_client/file_clientd 127.0.0.1 9094 sample.txt downloaded_sample.txt
 ```
 
-## Minimal Server Example
+## 最小 Server 示例
 
 ```cpp
 #include <cxpnet/cxpnet.h>
@@ -140,7 +140,7 @@ int main() {
 }
 ```
 
-## Minimal SampleClient Example
+## 最小 SampleClient 示例
 
 ```cpp
 #include <cxpnet/cxpnet.h>
@@ -174,20 +174,20 @@ int main() {
 }
 ```
 
-## Runtime Tuning
+## 运行时调优
 
-The following recommendations come from local loopback benchmarks on WSL2 Ubuntu 20.04 with `g++-13` and should be treated as tuning guidance, not as a hard rule for every deployment.
+下面的建议来自 WSL2 Ubuntu 20.04 上使用 `g++-13` 做的本地 loopback 基准测试。它们应该被当作调优参考，而不是所有部署环境的硬规则。
 
-- Small-packet, high-frequency workloads should start with `1 poll`, then benchmark before increasing `thread_num`.
-- On the local 64B benchmark, `1 poll` was faster than `8 poll` in both drain and echo scenarios:
-  - `drain`: about `2.40M msg/s` vs `1.89M msg/s`
-  - `echo`: about `345K req/s` vs `130K req/s`
-- The likely reason is that for small packets, the extra cross-thread dispatch and wakeup costs can exceed the gains from additional polls.
-- For low-to-medium connection counts, loopback testing, RPC-style request/response, or other latency-sensitive small-message traffic, prefer a single poll first.
-- For larger payloads, higher connection counts, or real NIC traffic, do not assume more polls are always better or always worse. Benchmark `thread_num=1` against a few larger values on the target machine.
-- This tuning choice should stay in application configuration. `cxpnet` does not try to auto-detect packet size patterns and switch poll strategies at runtime.
+- 小包、高频负载应先从 `1 poll` 开始，然后基准测试后再决定是否增加 `thread_num`。
+- 在本地 64B 基准中，`1 poll` 在 drain 和 echo 场景里都比 `8 poll` 更快：
+  - `drain`：约 `2.40M msg/s`，对比 `1.89M msg/s`
+  - `echo`：约 `345K req/s`，对比 `130K req/s`
+- 可能原因是：对小包来说，额外的跨线程派发和唤醒成本可能超过增加 poll 带来的收益。
+- 对低到中等连接数、loopback 测试、RPC 风格请求/响应，或其他对延迟敏感的小消息流量，优先尝试单 poll。
+- 对更大 payload、更高连接数或真实网卡流量，不要假设更多 poll 一定更好或一定更差。应在目标机器上把 `thread_num=1` 和几个更大的值做基准对比。
+- 这个调优选择应留在应用配置里。`cxpnet` 不会尝试在运行时自动检测包大小模式并切换 poll 策略。
 
-Typical starting points:
+典型起点：
 
-- Dedicated network thread: `set_thread_num(1)` + `start(RunningMode::kOnePollPerThread)` + `run()`
-- Application-managed main loop: `start(RunningMode::kAllOneThread)` + repeated `poll()`
+- 专用网络线程：`set_thread_num(1)` + `start(RunningMode::kOnePollPerThread)` + `run()`
+- 应用托管主循环：`start(RunningMode::kAllOneThread)` + 重复调用 `poll()`
