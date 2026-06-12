@@ -11,11 +11,11 @@ namespace cxpnet {
   class PollThreadPool {
   public:
     PollThreadPool(const std::vector<IOEventPoll*>& event_polls)
-        : polls_(event_polls)
-        , next_(0)
-        , shut_(false) {}
+        : polls_(event_polls) {
+    }
+
     ~PollThreadPool() {
-      if (!shut_) { shutdown(); }
+      if (!closed_.load(std::memory_order_acquire)) { shutdown(); }
     }
 
     PollThreadPool(const PollThreadPool&)            = delete;
@@ -27,8 +27,8 @@ namespace cxpnet {
   private:
     std::vector<IOEventPoll*>                 polls_;
     std::vector<std::unique_ptr<std::thread>> threads_;
-    std::atomic<size_t>                       next_;
-    std::atomic<bool>                         shut_;
+    std::atomic<size_t>                       next_ {0};
+    std::atomic<bool>                         closed_ {false};
   };
 } // namespace cxpnet
 

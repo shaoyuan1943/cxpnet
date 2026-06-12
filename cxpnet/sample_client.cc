@@ -10,28 +10,39 @@ namespace cxpnet {
   SampleClient::~SampleClient() { close(); }
 
   bool SampleClient::connect() {
-    if (ACQUIRE_LOAD(stopping_)) { return false; }
-
-    bool expected = false;
-    if (!started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) { return false; }
+    State expected = State::kCreated;
+    if (!state_.compare_exchange_strong(expected, State::kRunning, std::memory_order_acq_rel)) { return false; }
 
     event_poll_.run_in_poll([this]() { connect_in_poll_(); });
     return true;
   }
 
   void SampleClient::run() {
-    if (!ACQUIRE_LOAD(started_) && !ACQUIRE_LOAD(stopping_)) { return; }
+    State state = get_state_();
+    if (state == State::kCreated || state == State::kClosed) { return; }
+
     event_poll_.run();
   }
 
   void SampleClient::poll() {
-    if (!ACQUIRE_LOAD(started_) && !ACQUIRE_LOAD(stopping_)) { return; }
+    State state = get_state_();
+    if (state == State::kCreated || state == State::kClosed) { return; }
+
     event_poll_.poll();
   }
 
   void SampleClient::shutdown() {
-    RELEASE_STORE(started_, false);
-    RELEASE_STORE(stopping_, true);
+    State state = get_state_();
+    while (true) {
+      if (state == State::kClosed) { return; }
+      if (state == State::kClosing) { break; }
+
+      State next_state = state == State::kCreated ? State::kClosed : State::kClosing;
+      if (state_.compare_exchange_weak(state, next_state, std::memory_order_acq_rel)) {
+        if (next_state == State::kClosed) { return; }
+        break;
+      }
+    }
 
     ConnPtr conn_snapshot;
     {
@@ -43,8 +54,8 @@ namespace cxpnet {
   }
 
   void SampleClient::close() {
-    RELEASE_STORE(started_, false);
-    RELEASE_STORE(stopping_, true);
+    State old_state = state_.exchange(State::kClosed, std::memory_order_acq_rel);
+    if (old_state == State::kClosed) { return; }
 
     ConnPtr conn_snapshot;
     {
@@ -72,14 +83,14 @@ namespace cxpnet {
     send(msg.data(), msg.size());
   }
 
-  bool SampleClient::connected() const {
+  bool SampleClient::is_connected() const {
     ConnPtr conn_snapshot;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       conn_snapshot = conn_;
     }
 
-    return conn_snapshot && conn_snapshot->connected();
+    return conn_snapshot && conn_snapshot->is_connected();
   }
 
   ConnPtr SampleClient::conn() const {
@@ -88,7 +99,7 @@ namespace cxpnet {
   }
 
   bool SampleClient::is_active_() const {
-    return ACQUIRE_LOAD(started_) && !ACQUIRE_LOAD(stopping_);
+    return get_state_() == State::kRunning;
   }
 
   void SampleClient::connect_in_poll_() {

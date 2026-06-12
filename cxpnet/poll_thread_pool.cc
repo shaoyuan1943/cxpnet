@@ -15,7 +15,7 @@ namespace cxpnet {
   }
 
   void PollThreadPool::shutdown() {
-    if (shut_.exchange(true)) { return; }
+    if (closed_.exchange(true)) { return; }
 
     std::thread::id current_thread_id = std::this_thread::get_id();
 

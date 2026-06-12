@@ -27,7 +27,7 @@ namespace cxpnet {
     void send(const char* msg, size_t size);
     void send(std::string_view msg);
 
-    bool    connected() const;
+    bool    is_connected() const;
     ConnPtr conn() const;
 
     void set_conn_user_callback(std::function<void(ConnPtr)> func) {
@@ -39,22 +39,27 @@ namespace cxpnet {
       on_error_func_ = std::move(func);
     }
   private:
+    enum class State {
+      kCreated,
+      kRunning,
+      kClosing,
+      kClosed,
+    };
+
     bool is_active_() const;
+    State get_state_() const { return ACQUIRE_LOAD(state_); }
     void connect_in_poll_();
     void on_connected_(ConnPtr conn);
     void on_connect_error_(int err);
   private:
-    std::string        addr_;
-    uint16_t           port_;
-    IOEventPoll        event_poll_;
-    mutable std::mutex mutex_;
-    ConnPtr            conn_;
-
-    std::function<void(ConnPtr)> on_conn_func_;
-    std::function<void(int)>     on_error_func_;
-
-    std::atomic<bool> started_ {false};
-    std::atomic<bool> stopping_ {false};
+    std::string                  addr_;
+    uint16_t                     port_;
+    IOEventPoll                  event_poll_ {};
+    mutable std::mutex           mutex_ {};
+    ConnPtr                      conn_ {nullptr};
+    std::function<void(ConnPtr)> on_conn_func_ {nullptr};
+    std::function<void(int)>     on_error_func_ {nullptr};
+    std::atomic<State>           state_ {State::kCreated};
   };
 } // namespace cxpnet
 
