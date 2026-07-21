@@ -52,9 +52,9 @@ namespace cxpnet {
       }
 
       on_message_func_ = [message_func = std::move(message_func)](Buffer* buffer) {
-        std::string_view data(buffer->peek(), buffer->readable_size());
+        std::string_view data(buffer->readable_data(), buffer->readable_size());
         message_func(data);
-        buffer->been_read_all();
+        buffer->consume_all();
       };
     }
 

@@ -65,11 +65,10 @@ namespace cxpnet {
     size_t readable_size() const { return write_index_ - read_index_; }
     size_t writable_size() const { return capacity_ - write_index_; }
 
-    char*       to_read() const { return data_ + read_index_; }
-    const char* peek() const { return data_ + read_index_; }
+    const char* readable_data() const { return data_ + read_index_; }
 
-    void been_read(size_t len) {
-      CXPNET_CHECK(len <= readable_size(), "been_read: len exceeds readable size");
+    void consume(size_t len) {
+      CXPNET_CHECK(len <= readable_size(), "consume: len exceeds readable size");
       if (len == 0) { return; }
       if (len == readable_size()) {
         read_index_ = write_index_;
@@ -82,11 +81,11 @@ namespace cxpnet {
         shrink_if_needed_();
       }
     }
-    void been_read_all() { been_read(readable_size()); }
+    void consume_all() { consume(readable_size()); }
 
-    char* to_write() const { return data_ + write_index_; }
-    void  been_written(size_t len) {
-      CXPNET_CHECK(len <= writable_size(), "been_written: len exceeds writable size");
+    char* writable_data() { return data_ + write_index_; }
+    void  commit_write(size_t len) {
+      CXPNET_CHECK(len <= writable_size(), "commit_write: len exceeds writable size");
       write_index_ += len;
     }
 
@@ -94,8 +93,8 @@ namespace cxpnet {
     void append(const char* data, size_t len) {
       CXPNET_CHECK(len > 0, "append size must > 0");
       ensure_writable_size(len);
-      std::memcpy(to_write(), data, len);
-      been_written(len);
+      std::memcpy(writable_data(), data, len);
+      commit_write(len);
     }
 
     void ensure_writable_size(size_t len) {
@@ -117,7 +116,7 @@ namespace cxpnet {
             new_capacity *= 2;
           }
           char* new_buffer = new char[new_capacity];
-          std::memcpy(new_buffer, to_read(), written_size);
+          std::memcpy(new_buffer, readable_data(), written_size);
           delete[] data_;
           data_        = new_buffer;
           capacity_    = new_capacity;

@@ -321,9 +321,9 @@ namespace cxpnet {
         read_buffer_->ensure_writable_size(1024 * 2);
       }
 
-      int read_n = ::recv(handle_, read_buffer_->to_write(), read_buffer_->writable_size(), 0);
+      int read_n = ::recv(handle_, read_buffer_->writable_data(), read_buffer_->writable_size(), 0);
       if (read_n > 0) {
-        read_buffer_->been_written(read_n);
+        read_buffer_->commit_write(read_n);
         has_new_data = true;
         continue;
       }
@@ -356,9 +356,9 @@ namespace cxpnet {
 
     while (write_buffer_->readable_size() > 0) {
       size_t size   = write_buffer_->readable_size();
-      int    send_n = ::send(handle_, write_buffer_->peek(), size, 0);
+      int    send_n = ::send(handle_, write_buffer_->readable_data(), size, 0);
       if (send_n > 0) {
-        write_buffer_->been_read(send_n);
+        write_buffer_->consume(send_n);
 
         if (high_watermark_warning_ && write_buffer_->readable_size() <= low_watermark_) {
           if (watermark_func_ != nullptr) { watermark_func_(low_watermark_); }

@@ -19,8 +19,8 @@ int main(int argc, char* argv[]) {
       port,
       [&](cxpnet::ConnPtr connected_conn) {
         connected_conn->set_message_callback([connected_conn](cxpnet::Buffer* buffer) {
-          std::string response(buffer->peek(), buffer->readable_size());
-          buffer->been_read_all();
+          std::string response(buffer->readable_data(), buffer->readable_size());
+          buffer->consume_all();
           std::cout << "echo response: " << response << std::endl;
           connected_conn->shutdown();
         });

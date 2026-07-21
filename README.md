@@ -40,7 +40,7 @@ cmake -S <repo-root-path> -B <repo-root-path>/build/debug \
 `Conn` 的读处理有两种回调形式：
 
 - `set_message_callback(std::function<void(std::string_view)>)` 是高级形式。这个 view 只在回调期间有效；回调返回后，cxpnet 会消费当前所有可读字节。
-- `set_message_callback(std::function<void(Buffer*)>)` 是低级形式。适合需要通过 `been_read(n)` 或 `been_read_all()` 做局部消费的协议解析器。
+- `set_message_callback(std::function<void(Buffer*)>)` 是低级形式。适合需要通过 `consume(n)` 或 `consume_all()` 做局部消费的协议解析器。
 
 连接关闭事件请单独使用 `set_close_callback(...)`。
 
