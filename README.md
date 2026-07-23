@@ -35,6 +35,16 @@ cmake -S <repo-root-path> -B <repo-root-path>/build/debug \
 
 按约定，`Server` 和 `Conn` 都是一次性对象。调用 `shutdown()/close()` 之后，或者 connect/start 路径失败之后，应创建新对象，不要复用旧对象。
 
+生命周期约束：
+
+- 独立使用 `Conn` 时，应在释放最后一个 `ConnPtr` 前调用 `close()`，并让所属 `IOEventPoll` 驱动完清理；`IOEventPoll` 的生命周期必须长于其管理的 `Conn`。
+- `Server::shutdown()` 和 `Server::close()` 可以跨线程调用。使用 `kOnePollPerThread` 时，主 poll 必须已经在 `run()` 中，或者随后进入 `run()`，关闭流程才能继续推进；应在 `run()` 返回后再析构 `Server`。
+- 不要在 `Server::set_conn_user_callback` 或 `Server::set_error_user_callback` 的回调中调用该 `Server` 的 `shutdown()/close()`，也不要在这些回调中析构该 `Server`。
+- 任何用户回调执行期间，如需对当前 `Conn` 调用 `shutdown()/close()`，不要同步调用；应通过 `Conn::run_later_in_poll()` 投递到所属 `IOEventPoll`，让关闭操作在当前回调返回后执行。所属 poll 必须继续运行，投递的任务才能执行。
+- `Conn` 保存的消息回调是长生命周期回调，应捕获 `weak_ptr`，避免 `Conn -> callback -> Conn` 的引用环。`run_later_in_poll()` 投递的是一次性任务，可以捕获 `ConnPtr`；任务执行并销毁后，引用计数会正常减一。
+
+对端半关闭写方向时，`Conn` 会先交付已收到的数据，并继续发送应用在回调中产生的响应；待写缓冲全部排空后，再完成连接关闭。
+
 `SampleClient` 是一个很小的单连接客户端封装。如果需要重连逻辑、连接池、协议客户端或其他高级行为，直接组合使用 `Conn` 和 `IOEventPoll`。
 
 `Conn` 的读处理有两种回调形式：
@@ -43,6 +53,23 @@ cmake -S <repo-root-path> -B <repo-root-path>/build/debug \
 - `set_message_callback(std::function<void(Buffer*)>)` 是低级形式。适合需要通过 `consume(n)` 或 `consume_all()` 做局部消费的协议解析器。
 
 连接关闭事件请单独使用 `set_close_callback(...)`。
+
+如果消息处理完成后需要关闭连接，先同步发送响应，再投递关闭操作：
+
+```cpp
+std::weak_ptr<cxpnet::Conn> weak_conn = conn;
+conn->set_message_callback([weak_conn](std::string_view data) {
+  auto conn = weak_conn.lock();
+  if (!conn) { return; }
+
+  conn->send(data);
+  conn->run_later_in_poll([conn]() {
+    conn->shutdown();
+  });
+});
+```
+
+`send()`、读取/消费 `Buffer` 和只读查询可以在回调中同步执行。`shutdown()/close()` 以及其他会推进当前连接生命周期或改变 channel 注册状态的操作，应在 `run_later_in_poll()` 任务中执行。通过 `SampleClient` 使用连接时，在回调中调用 `SampleClient::shutdown()/close()` 也应采用相同方式延后执行。
 
 如果需要直接使用项目检查宏，请包含 `#include <cxpnet/check.h>` 并使用 `CXPNET_CHECK(condition, fmt, ...)`。Debug 下它会 assert；Release 下它会抛出 `std::runtime_error`。
 
@@ -89,6 +116,7 @@ build/release/examples/echo_server/echo_server
 - `http_client`：使用 `SampleClient` 的 HTTP GET 客户端。
 - `file_server`：简单的 `GET <path>` 文件传输服务器。
 - `file_client`：把响应体写入磁盘的文件传输客户端。
+- `graceful_shutdown_server`：展示第一次 `SIGINT/SIGTERM` 触发 `Server::shutdown()`，第二次升级到 `Server::close()`。
 - `timer_poll`：`IOEventPoll` 上的定时器回调示例。
 
 典型本地运行方式：
@@ -119,14 +147,18 @@ HTTP：
 ```cpp
 #include <cxpnet/cxpnet.h>
 
+#include <memory>
 #include <string_view>
 
 int main() {
   cxpnet::Server server("127.0.0.1", 9090);
   server.set_thread_num(1);
   server.set_conn_user_callback([](cxpnet::ConnPtr conn) {
-    conn->set_message_callback([conn](std::string_view data) {
-      conn->send(data);
+    std::weak_ptr<cxpnet::Conn> weak_conn = conn;
+    conn->set_message_callback([weak_conn](std::string_view data) {
+      if (auto conn = weak_conn.lock()) {
+        conn->send(data);
+      }
     });
     conn->set_close_callback([](int) {});
   });
@@ -145,24 +177,38 @@ int main() {
 ```cpp
 #include <cxpnet/cxpnet.h>
 
+#include <memory>
 #include <string_view>
 
 int main() {
   cxpnet::SampleClient client("127.0.0.1", 9090);
   client.set_conn_user_callback([&](cxpnet::ConnPtr conn) {
-    conn->set_message_callback([&](std::string_view data) {
+    std::weak_ptr<cxpnet::Conn> weak_conn = conn;
+    conn->set_message_callback([&client, weak_conn](std::string_view data) {
       client.send(data);
-      client.close();
+      if (auto conn = weak_conn.lock()) {
+        conn->run_later_in_poll([&client]() {
+          client.close();
+        });
+      }
     });
-    conn->set_close_callback([&](int) {
-      client.close();
+    conn->set_close_callback([&client, weak_conn](int) {
+      if (auto conn = weak_conn.lock()) {
+        conn->run_later_in_poll([&client]() {
+          client.close();
+        });
+      }
     });
 
     client.send("hello", 5);
   });
 
   client.set_error_user_callback([&](int) {
-    client.close();
+    if (auto conn = client.conn()) {
+      conn->run_later_in_poll([&client]() {
+        client.close();
+      });
+    }
   });
 
   if (!client.connect()) {

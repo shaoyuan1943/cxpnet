@@ -203,6 +203,10 @@ namespace cxpnet {
     return handle;
   }
 
+  int Platform::send(int fd, const char* data, size_t size) {
+    return static_cast<int>(::send(fd, data, size, MSG_NOSIGNAL));
+  }
+
   void Platform::shut_wr(int fd) {
     ::shutdown(fd, SHUT_WR);
   }

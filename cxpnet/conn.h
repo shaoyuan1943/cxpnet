@@ -38,6 +38,7 @@ namespace cxpnet {
 
     void shutdown();
     void close();
+    void run_later_in_poll(Closure func);
 
     std::pair<const char*, uint16_t> remote_addr_and_port() const {
       return std::make_pair(addr_, port_);
@@ -83,20 +84,6 @@ namespace cxpnet {
         write_buffer_.reset(new Buffer(write_size));
       }
     }
-    // NOT thread-safe！
-    // Only invoke this function in OnConnectionCallback
-    void set_watermark(uint high, uint low) {
-      if (high == low) { return; }
-      if (high == 0 || low == 0) { return; }
-
-      high_watermark_ = high;
-      low_watermark_  = low;
-    }
-    // NOT thread-safe！
-    // Only invoke this function in OnConnectionCallback
-    void set_watermark_callback(std::function<void(int)> watermark_func) {
-      if (watermark_func) { watermark_func_ = std::move(watermark_func); }
-    }
   private:
     friend class cxpnet::IOEventPoll;
     friend class cxpnet::Server;
@@ -134,15 +121,12 @@ namespace cxpnet {
     std::function<void(Buffer*)> on_message_func_ {nullptr};
     std::function<void(int)>     on_close_func_ {nullptr};
     Closure                      internal_close_callback_ {nullptr};
-    std::function<void(int)>     watermark_func_ {nullptr};
-    uint                         high_watermark_ {1024 * 1024};
-    uint                         low_watermark_ {256 * 1024};
-    bool                         high_watermark_warning_;
     char                         addr_[INET6_ADDRSTRLEN] {0};
     uint16_t                     port_ {0};
     std::atomic<State>           state_ {State::kCreated};
     std::unique_ptr<Buffer>      read_buffer_ {nullptr};
     std::unique_ptr<Buffer>      write_buffer_ {nullptr};
+    bool                         close_after_write_ {false};
 
     uint32_t                     graceful_close_timeout_ms_ {500};
     Timer::TimerID               close_timer_id_ {0};

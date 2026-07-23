@@ -9,6 +9,7 @@ set(CXPNET_EXAMPLES
   http_client
   file_server
   file_client
+  graceful_shutdown_server
   timer_poll
 )
 

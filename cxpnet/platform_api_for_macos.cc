@@ -7,6 +7,14 @@
 #include <unordered_map>
 
 namespace cxpnet {
+  namespace {
+    bool suppress_sigpipe(int fd) {
+      int value = 1;
+      return ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE,
+                          &value, sizeof(value)) != SOCKET_ERROR;
+    }
+  } // namespace
+
   // macOS wakeup fd 映射：写端 fd -> 读端 fd
   // 使用 unordered_map 存储映射，避免 pipe fd 不连续假设
   static std::unordered_map<int, int> g_wakeup_fd_map;
@@ -158,6 +166,11 @@ namespace cxpnet {
         continue;
       }
 
+      if (!suppress_sigpipe(handle)) {
+        close_handle(handle);
+        continue;
+      }
+
       accepted_handles.push_back(std::make_pair(handle, remote_addr_storage));
     }
 
@@ -169,6 +182,11 @@ namespace cxpnet {
 
     int handle = socket(addr_storage.ss_family, SOCK_STREAM, IPPROTO_TCP);
     if (handle == invalid_socket) { return -1; }
+
+    if (!suppress_sigpipe(handle)) {
+      close_handle(handle);
+      return -1;
+    }
 
     if (!set_non_blocking(handle)) {
       close_handle(handle);
@@ -212,6 +230,10 @@ namespace cxpnet {
     }
 
     return handle;
+  }
+
+  int Platform::send(int fd, const char* data, size_t size) {
+    return static_cast<int>(::send(fd, data, size, 0));
   }
 
   void Platform::shut_wr(int fd) {

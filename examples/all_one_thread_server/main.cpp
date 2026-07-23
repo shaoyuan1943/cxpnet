@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <string_view>
 #include <thread>
 
@@ -13,8 +14,11 @@ int main(int argc, char* argv[]) {
   cxpnet::Server server(host, port, cxpnet::ProtocolStack::kIPv4Only, cxpnet::SocketOption::kReuseAddr);
 
   server.set_conn_user_callback([](cxpnet::ConnPtr conn) {
-    conn->set_message_callback([conn](std::string_view data) {
-      conn->send(data);
+    std::weak_ptr<cxpnet::Conn> weak_conn = conn;
+    conn->set_message_callback([weak_conn](std::string_view data) {
+      if (auto conn = weak_conn.lock()) {
+        conn->send(data);
+      }
     });
     conn->set_close_callback([](int err) {
       std::cout << "client closed: " << err << std::endl;

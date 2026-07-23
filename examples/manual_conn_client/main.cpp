@@ -18,11 +18,16 @@ int main(int argc, char* argv[]) {
       host,
       port,
       [&](cxpnet::ConnPtr connected_conn) {
-        connected_conn->set_message_callback([connected_conn](cxpnet::Buffer* buffer) {
+        std::weak_ptr<cxpnet::Conn> weak_conn = connected_conn;
+        connected_conn->set_message_callback([weak_conn](cxpnet::Buffer* buffer) {
           std::string response(buffer->readable_data(), buffer->readable_size());
           buffer->consume_all();
           std::cout << "echo response: " << response << std::endl;
-          connected_conn->shutdown();
+          if (auto conn = weak_conn.lock()) {
+            conn->run_later_in_poll([conn]() {
+              conn->shutdown();
+            });
+          }
         });
         connected_conn->set_close_callback([&](int err) {
           std::cout << "connection closed: " << err << std::endl;

@@ -33,7 +33,6 @@ namespace cxpnet {
     void poll(); // non-blocking
 
     void set_thread_num(int n) { thread_num_ = n; }
-
     void set_conn_user_callback(std::function<void(ConnPtr)> func) {
       on_conn_func_ = std::move(func);
     }
@@ -83,7 +82,7 @@ namespace cxpnet {
 
     int                thread_num_ {0};
     std::atomic<State> state_ {State::kCreated};
-    std::atomic<bool>  close_polls_flag_ {false};
+    std::atomic<bool>  polls_closed_ {false};
     RunningMode        running_mode_ {RunningMode::kOnePollPerThread};
 
     std::unordered_map<int, ConnPtr> conns_;
@@ -92,8 +91,8 @@ namespace cxpnet {
     std::function<void(ConnPtr)> on_conn_func_ {nullptr};
     std::function<void(int)>     on_error_func_ {nullptr};
 
-    size_t   max_connections_ {0};             // 0 表示无限制
-    uint32_t graceful_close_timeout_ms_ {500}; // 默认 5 秒
+    size_t   max_connections_ {0}; // 0 表示无限制
+    uint32_t graceful_close_timeout_ms_ {500};
   };
 } // namespace cxpnet
 

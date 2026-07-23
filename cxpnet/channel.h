@@ -16,6 +16,7 @@ namespace cxpnet {
 
     void unregister();
     void add_read_event();
+    void remove_read_event();
     void add_write_event();
     void remove_write_event();
     void handle_event();
@@ -24,8 +25,8 @@ namespace cxpnet {
     int          handle() const { return handle_; }
     int          events() const { return events_; }
     void         set_result_events(int events) { result_events_ = events; }
-    bool         reading() const { return events_ & events::kRead; }
-    bool         writing() const { return events_ & events::kWrite; }
+    bool         is_reading() const { return events_ & events::kRead; }
+    bool         is_writing() const { return events_ & events::kWrite; }
     IOEventPoll* event_poll() const { return event_poll_; }
     bool         is_none_event() const { return events_ == events::kNone; }
 

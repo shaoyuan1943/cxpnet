@@ -29,7 +29,7 @@ namespace cxpnet {
 
     bool listen();
     void close();
-    bool is_listen() const {
+    bool is_listening() const {
       return get_state_() == State::kListening;
     }
     void set_new_conn_callback(std::function<void(int, struct sockaddr_storage)>&& func) {

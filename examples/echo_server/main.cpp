@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <string_view>
 
 int main(int argc, char* argv[]) {
@@ -16,8 +17,11 @@ int main(int argc, char* argv[]) {
     std::cout << "client connected: " << conn->remote_addr_and_port().first
               << ":" << conn->remote_addr_and_port().second << std::endl;
 
-    conn->set_message_callback([conn](std::string_view data) {
-      conn->send(data);
+    std::weak_ptr<cxpnet::Conn> weak_conn = conn;
+    conn->set_message_callback([weak_conn](std::string_view data) {
+      if (auto conn = weak_conn.lock()) {
+        conn->send(data);
+      }
     });
     conn->set_close_callback([](int err) {
       std::cout << "client closed: " << err << std::endl;

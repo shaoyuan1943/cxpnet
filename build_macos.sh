@@ -16,6 +16,7 @@ EXAMPLE_TARGETS=(
   http_client
   file_server
   file_client
+  graceful_shutdown_server
   timer_poll
 )
 

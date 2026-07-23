@@ -49,7 +49,7 @@ namespace cxpnet {
         channels_[handle] = channel;
       }
     } else {
-      op = channel->is_none_event() ? EPOLL_CTL_DEL : EPOLL_CTL_ADD;
+      op = channel->is_none_event() ? EPOLL_CTL_DEL : EPOLL_CTL_MOD;
     }
 
     if (op != 0) {
@@ -81,10 +81,7 @@ namespace cxpnet {
     // EPOLL_CTL_DEL 时 fd 可能已经关闭，忽略错误
     // EPOLL_CTL_MOD/ADD 时 fd 应该有效
     if (epoll_ctl(epoll_fd_, op, channel->handle(), &event) < 0) {
-      if (op == EPOLL_CTL_DEL) {
-        return;
-      }
-
+      if (op == EPOLL_CTL_DEL) { return; }
       CXPNET_CHECK(false, "epoll_ctl failed for op = {}, fd = {}, errno = {}",
                    op, channel->handle(), errno);
     }
@@ -93,9 +90,7 @@ namespace cxpnet {
   void EpollPoller::fill_active_channels(int event_n, std::vector<Channel*>& active_channels) {
     for (int i = 0; i < event_n; ++i) {
       Channel* channel = static_cast<Channel*>(events_[i].data.ptr);
-      if (!has_channel(channel->handle())) {
-        continue;
-      }
+      if (!has_channel(channel->handle())) { continue; }
 
       int revents = from_epoll_events(events_[i].events);
       channel->set_result_events(revents);
@@ -135,7 +130,7 @@ namespace cxpnet {
     }
 
     if (events & EPOLLRDHUP) {
-      result |= cxpnet::events::kHup;
+      result |= cxpnet::events::kRead;
     }
 
     return result;

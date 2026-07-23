@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -43,12 +44,18 @@ int main(int argc, char* argv[]) {
 
   server.set_thread_num(1);
   server.set_conn_user_callback([root](cxpnet::ConnPtr conn) {
-    conn->set_message_callback([root, conn](std::string_view data) {
+    std::weak_ptr<cxpnet::Conn> weak_conn = conn;
+    conn->set_message_callback([root, weak_conn](std::string_view data) {
+      auto conn = weak_conn.lock();
+      if (!conn) { return; }
+
       std::string request(data);
 
       if (!request.starts_with("GET ")) {
         conn->send("ERR unsupported command\n");
-        conn->shutdown();
+        conn->run_later_in_poll([conn]() {
+          conn->shutdown();
+        });
         return;
       }
 
@@ -61,7 +68,9 @@ int main(int argc, char* argv[]) {
       }
 
       conn->send(read_file(root, filename));
-      conn->shutdown();
+      conn->run_later_in_poll([conn]() {
+        conn->shutdown();
+      });
     });
     conn->set_close_callback([](int err) {
       std::cout << "file connection closed: " << err << std::endl;

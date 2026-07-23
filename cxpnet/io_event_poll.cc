@@ -51,9 +51,7 @@ namespace cxpnet {
   }
 
   void IOEventPoll::poll() {
-    if (ACQUIRE_LOAD(shut_)) {
-      return;
-    }
+    if (ACQUIRE_LOAD(closed_)) { return; }
 
     poll_(0);
   }
@@ -61,7 +59,7 @@ namespace cxpnet {
   void IOEventPoll::run() {
     thread_id_ = std::this_thread::get_id();
 
-    while (!ACQUIRE_LOAD(shut_)) {
+    while (!ACQUIRE_LOAD(closed_)) {
       uint32_t poll_timeout = timer_manager_->next_timeout_ms(kMaxIdlePollTimeoutMS);
       poll_(poll_timeout);
     }
@@ -71,16 +69,10 @@ namespace cxpnet {
   }
 
   void IOEventPoll::shutdown() {
-    if (ACQUIRE_LOAD(shut_)) {
-      return;
-    }
+    if (ACQUIRE_LOAD(closed_)) { return; }
 
-    RELEASE_STORE(shut_, true);
-
-    if (timer_manager_) {
-      timer_manager_->shutdown();
-    }
-
+    RELEASE_STORE(closed_, true);
+    if (timer_manager_) { timer_manager_->shutdown(); }
     notify_wakeup_();
   }
 

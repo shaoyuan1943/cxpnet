@@ -83,7 +83,7 @@ namespace cxpnet {
     if (connection_count() != 0) { return; }
 
     bool expected = false;
-    if (!close_polls_flag_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+    if (!polls_closed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
       return;
     }
 
@@ -153,11 +153,11 @@ namespace cxpnet {
       return false;
     }
 
-    RELEASE_STORE(close_polls_flag_, false);
+    RELEASE_STORE(polls_closed_, false);
 
     running_mode_ = mode;
 
-    constexpr int kMaxThreadNum = 1024;
+    constexpr int kMaxThreadNum = 24;
     if (running_mode_ == RunningMode::kOnePollPerThread) {
       if (thread_num_ <= 0 || thread_num_ > kMaxThreadNum) {
         RELEASE_STORE(state_, State::kClosed);
@@ -193,7 +193,8 @@ namespace cxpnet {
   void Server::run() {
     CXPNET_CHECK(running_mode_ == RunningMode::kOnePollPerThread, "");
 
-    if (ACQUIRE_LOAD(state_) != State::kRunning) { return; }
+    State state = ACQUIRE_LOAD(state_);
+    if (state == State::kCreated || state == State::kClosed) { return; }
     main_poll_->run();
   }
 
@@ -297,6 +298,7 @@ namespace cxpnet {
           Platform::close_handle(conn->handle_);
           conn->handle_ = invalid_socket;
         }
+
         return;
       }
 

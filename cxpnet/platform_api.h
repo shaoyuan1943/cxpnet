@@ -28,6 +28,7 @@ namespace cxpnet {
     static int              listen(sockaddr_storage addr_storage, ProtocolStack proto_stack, int option);
     static int              accept(int listen_handle, std::vector<std::pair<int, sockaddr_storage>>& accepted_handles);
     static int              connect(sockaddr_storage addr_storage, bool async = true, uint32_t timeout_ms = 5000);
+    static int              send(int fd, const char* data, size_t size);
     static void             shut_wr(int fd);
 
     // wakeup 机制: Linux 使用 eventfd, macOS 使用 pipe

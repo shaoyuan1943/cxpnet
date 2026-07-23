@@ -160,7 +160,6 @@ namespace cxpnet {
   // 可能跨线程调用，shutdown 里面不要访问 handle_ 或 channel_
   void Conn::shutdown() {
     if (!is_connected()) { return; }
-    if (get_state_() == State::kClosed) { return; }
 
     if (event_poll_->is_in_poll_thread()) {
       enter_closing_in_poll_();
@@ -204,7 +203,8 @@ namespace cxpnet {
   void Conn::close() {
     // 支持先 shutdown 后再 close：从优雅退出升级到强制退出
     State state = get_state_();
-    if (state != State::kConnected && state != State::kClosing) { return; }
+    if (state != State::kConnecting && state != State::kConnected
+        && state != State::kClosing) { return; }
 
     if (event_poll_->is_in_poll_thread()) {
       do_close_in_poll_(0);
@@ -215,6 +215,10 @@ namespace cxpnet {
     event_poll_->run_in_poll([self]() {
       self->do_close_in_poll_(0);
     });
+  }
+
+  void Conn::run_later_in_poll(Closure func) {
+    event_poll_->run_later(std::move(func));
   }
 
   void Conn::do_close_in_poll_(int err) {
@@ -311,6 +315,7 @@ namespace cxpnet {
 
   void Conn::handle_read_event_() {
     bool has_new_data     = false;
+    bool peer_closed      = false;
     bool should_close     = false;
     int  close_reason_err = 0;
 
@@ -330,7 +335,7 @@ namespace cxpnet {
 
       // 对端关闭
       if (read_n == 0) {
-        should_close = true;
+        peer_closed = true;
         break;
       }
 
@@ -347,8 +352,23 @@ namespace cxpnet {
       break;
     }
 
+    if (peer_closed) {
+      close_after_write_ = true;
+      if (channel_) { channel_->remove_read_event(); }
+    }
+
     if (has_new_data && on_message_func_ != nullptr) { on_message_func_(read_buffer_.get()); }
-    if (should_close) { handle_close_event_(close_reason_err); }
+    if (should_close) {
+      handle_close_event_(close_reason_err);
+      return;
+    }
+
+    if (!peer_closed || get_state_() == State::kClosed) { return; }
+
+    set_state_(State::kClosing);
+    if (!write_buffer_ || write_buffer_->readable_size() == 0) {
+      do_close_in_poll_(0);
+    }
   }
 
   void Conn::handle_write_event_() {
@@ -356,14 +376,9 @@ namespace cxpnet {
 
     while (write_buffer_->readable_size() > 0) {
       size_t size   = write_buffer_->readable_size();
-      int    send_n = ::send(handle_, write_buffer_->readable_data(), size, 0);
+      int    send_n = Platform::send(handle_, write_buffer_->readable_data(), size);
       if (send_n > 0) {
         write_buffer_->consume(send_n);
-
-        if (high_watermark_warning_ && write_buffer_->readable_size() <= low_watermark_) {
-          if (watermark_func_ != nullptr) { watermark_func_(low_watermark_); }
-          high_watermark_warning_ = false;
-        }
         continue;
       }
 
@@ -379,6 +394,10 @@ namespace cxpnet {
     if (write_buffer_->readable_size() == 0) {
       write_buffer_->clear();
       channel_->remove_write_event();
+      if (close_after_write_) {
+        do_close_in_poll_(0);
+        return;
+      }
       if (get_state_() == State::kClosing) { Platform::shut_wr(handle_); }
     }
   }
@@ -395,18 +414,15 @@ namespace cxpnet {
       return;
     }
 
-    static constexpr size_t kDirectWriteBudget = 64 * 1024;
-
     if (write_buffer_->readable_size() > 0) {
       write_buffer_->append(data, size);
       channel_->add_write_event();
     } else {
-      size_t sent_bytes        = 0;
-      size_t direct_write_goal = (std::min)(size, kDirectWriteBudget);
+      size_t sent_bytes = 0;
 
-      while (sent_bytes < direct_write_goal) {
-        size_t attempt_size = direct_write_goal - sent_bytes;
-        int    send_n       = ::send(handle_, data + sent_bytes, attempt_size, 0);
+      while (sent_bytes < size) {
+        size_t attempt_size = size - sent_bytes;
+        int    send_n       = Platform::send(handle_, data + sent_bytes, attempt_size);
         if (send_n > 0) {
           sent_bytes += static_cast<size_t>(send_n);
           continue;
@@ -427,11 +443,6 @@ namespace cxpnet {
         write_buffer_->append(data + sent_bytes, size - sent_bytes);
         channel_->add_write_event();
       }
-    }
-
-    if (!high_watermark_warning_ && write_buffer_->readable_size() > high_watermark_) {
-      if (watermark_func_ != nullptr) { watermark_func_(high_watermark_); }
-      high_watermark_warning_ = true;
     }
   }
 } // namespace cxpnet

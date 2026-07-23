@@ -16,19 +16,25 @@ namespace cxpnet {
   }
 
   void Channel::add_read_event() {
-    if (reading()) { return; }
+    if (is_reading()) { return; }
     events_ |= events::kRead;
     update_();
   }
 
+  void Channel::remove_read_event() {
+    if (!is_reading()) { return; }
+    events_ &= ~events::kRead;
+    update_();
+  }
+
   void Channel::add_write_event() {
-    if (writing()) { return; }
+    if (is_writing()) { return; }
     events_ |= events::kWrite;
     update_();
   }
 
   void Channel::remove_write_event() {
-    if (!writing()) { return; }
+    if (!is_writing()) { return; }
     events_ &= ~events::kWrite;
     update_();
   }
@@ -57,12 +63,10 @@ namespace cxpnet {
   }
 
   void Channel::handle_event_() {
-    if (result_events_ & (events::kError | events::kHup)) {
+    if (result_events_ & events::kError) {
       int err = 0;
-      if (result_events_ & events::kError) {
-        socklen_t err_len = sizeof(err);
-        getsockopt(handle_, SOL_SOCKET, SO_ERROR, &err, &err_len);
-      }
+      socklen_t err_len = sizeof(err);
+      getsockopt(handle_, SOL_SOCKET, SO_ERROR, &err, &err_len);
 
       // try recv data before closing
       if (result_events_ & events::kRead) {
@@ -73,6 +77,16 @@ namespace cxpnet {
         on_close_func_(err);
       }
 
+      return;
+    }
+
+    if (result_events_ & events::kHup) {
+      if (result_events_ & events::kRead) {
+        if (on_read_func_ != nullptr) { on_read_func_(); }
+        return;
+      }
+
+      if (on_close_func_ != nullptr) { on_close_func_(0); }
       return;
     }
 

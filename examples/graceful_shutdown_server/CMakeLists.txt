@@ -1,0 +1,2 @@
+add_executable(graceful_shutdown_server main.cpp)
+target_link_libraries(graceful_shutdown_server PRIVATE cxpnet::cxpnet)
