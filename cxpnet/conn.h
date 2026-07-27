@@ -96,7 +96,7 @@ namespace cxpnet {
 
     void  set_state_(State s) { RELEASE_STORE(state_, s); }
     State get_state_() const { return ACQUIRE_LOAD(state_); }
-    bool  can_read_() const {
+    bool  is_readable_() const {
       return get_state_() == State::kConnected || get_state_() == State::kClosing;
     }
     void set_internal_close_callback_(Closure&& close_callback) { internal_close_callback_ = std::move(close_callback); }

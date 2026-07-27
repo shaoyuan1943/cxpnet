@@ -203,8 +203,7 @@ namespace cxpnet {
   void Conn::close() {
     // 支持先 shutdown 后再 close：从优雅退出升级到强制退出
     State state = get_state_();
-    if (state != State::kConnecting && state != State::kConnected
-        && state != State::kClosing) { return; }
+    if (state != State::kConnecting && state != State::kConnected && state != State::kClosing) { return; }
 
     if (event_poll_->is_in_poll_thread()) {
       do_close_in_poll_(0);
@@ -226,11 +225,9 @@ namespace cxpnet {
 
     State old_state = state_.exchange(State::kClosed, std::memory_order_acq_rel);
     if (old_state == State::kClosed) { return; }
-
-    cancel_closing_timer_();
-
     if (handle_ == invalid_socket && !channel_) { return; }
 
+    cancel_closing_timer_();
     finish_close_(err);
   }
 
@@ -320,7 +317,7 @@ namespace cxpnet {
     int  close_reason_err = 0;
 
     while (true) {
-      if (!can_read_()) { return; }
+      if (!is_readable_()) { return; }
 
       if (read_buffer_->writable_size() == 0) {
         read_buffer_->ensure_writable_size(1024 * 2);
@@ -333,7 +330,7 @@ namespace cxpnet {
         continue;
       }
 
-      // 对端关闭
+      // 收到对端FIN，本端读关闭，但可能还可写
       if (read_n == 0) {
         peer_closed = true;
         break;
@@ -352,12 +349,14 @@ namespace cxpnet {
       break;
     }
 
+    // 关闭本端读
     if (peer_closed) {
       close_after_write_ = true;
       if (channel_) { channel_->remove_read_event(); }
     }
 
     if (has_new_data && on_message_func_ != nullptr) { on_message_func_(read_buffer_.get()); }
+
     if (should_close) {
       handle_close_event_(close_reason_err);
       return;
@@ -373,6 +372,8 @@ namespace cxpnet {
 
   void Conn::handle_write_event_() {
     CXPNET_CHECK(event_poll_->is_in_poll_thread(), "Must in IO thread");
+
+    if (get_state_() == State::kClosed) { return; }
 
     while (write_buffer_->readable_size() > 0) {
       size_t size   = write_buffer_->readable_size();
@@ -398,6 +399,8 @@ namespace cxpnet {
         do_close_in_poll_(0);
         return;
       }
+
+      // 关闭过程中，IOEventPoll 还在驱动中，写完之后进行写端关闭
       if (get_state_() == State::kClosing) { Platform::shut_wr(handle_); }
     }
   }

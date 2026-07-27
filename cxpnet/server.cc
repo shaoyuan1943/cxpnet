@@ -44,7 +44,6 @@ namespace cxpnet {
 
     bool entered_closing = try_enter_closing_();
     if (!entered_closing) {
-      // 是否是先 shutdown 再 close
       if (get_state_() != State::kClosing) { return; }
     }
 
