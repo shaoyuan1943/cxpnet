@@ -1,4 +1,4 @@
-﻿#include "server.h"
+#include "server.h"
 #include "acceptor.h"
 #include "check.h"
 #include "conn.h"
@@ -22,8 +22,17 @@ namespace cxpnet {
 
   Server::~Server() {
     // 析构会 join poll 线程并释放 poll 资源；在 poll 线程的事件循环内析构
-    // 等于 join 自己或访问正在执行的对象
+    // 等于 join 自己或访问正在执行的对象。
+    // Release 下 CHECK 以抛异常失败，析构内抛异常即 terminate——这正是
+    // 违例时想要的 fail-fast 行为，抑制编译器告警即可
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wterminate"
+#endif
     CXPNET_CHECK(!is_in_any_poll_thread_(), "Server must not be destroyed on a poll thread");
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
     close();
   }
