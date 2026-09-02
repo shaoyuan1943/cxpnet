@@ -17,18 +17,17 @@ namespace cxpnet {
   void PollThreadPool::shutdown() {
     if (closed_.exchange(true)) { return; }
 
+    // Server 的关闭流程保证不会从 poll 线程调到这里；直接断言而不是 detach，
+    // 避免 detached 线程在 IOEventPoll 析构后仍访问它
     std::thread::id current_thread_id = std::this_thread::get_id();
+    for (const auto& t : threads_) {
+      CXPNET_CHECK(!t->joinable() || t->get_id() != current_thread_id,
+                   "PollThreadPool::shutdown must not be called from a poll thread");
+    }
 
     for (auto poll : polls_) { poll->shutdown(); }
     for (const auto& t : threads_) {
-      if (!t->joinable()) { continue; }
-
-      if (t->get_id() == current_thread_id) {
-        t->detach();
-        continue;
-      }
-
-      t->join();
+      if (t->joinable()) { t->join(); }
     }
   }
 

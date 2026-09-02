@@ -35,15 +35,22 @@ cmake -S <repo-root-path> -B <repo-root-path>/build/debug \
 
 按约定，`Server` 和 `Conn` 都是一次性对象。调用 `shutdown()/close()` 之后，或者 connect/start 路径失败之后，应创建新对象，不要复用旧对象。
 
+关闭语义：
+
+- `shutdown()` 是优雅关闭：先把写缓冲冲刷完再发 FIN，期间仍能接收对端数据。连接最多再存活 `set_graceful_close_timeout(ms)` 设定的时间（默认 500ms；0 表示不设上限），超时仍未完成则强制关闭。`Server::shutdown()` 会把该超时应用到当前所有连接。
+- `close()` 是立即关闭：丢弃未发数据，马上回收资源。
+- 先 `shutdown()` 再 `close()` 是合法的升级路径（例如第一次 SIGTERM 优雅退出、第二次强制）。
+
 生命周期约束：
 
+- `Server::shutdown()` 只发起关闭、不等待收敛，可以在任意线程调用，包括用户回调。需要等待全部连接结束时，自行轮询 `connection_count()`；`kAllOneThread` 模式下还需继续调用 `poll()` 驱动关闭进展。
+- `Server::close()` 和析构不允许在 poll 线程（含任何用户回调执行期间）中调用：`close()` 会 join poll 线程，在 poll 线程中调用等于 join 自己，库会以 `CXPNET_CHECK` 直接失败。回调里想关停整个服务器请调 `shutdown()`，`close()` 和析构留给控制线程。
+- 使用 `kOnePollPerThread` 时，主 poll 必须已经在 `run()` 中，或者随后进入 `run()`，关闭流程才能继续推进；`run()` 只在 `close()` 之后返回，应在 `run()` 返回后再析构 `Server`。
 - 独立使用 `Conn` 时，应在释放最后一个 `ConnPtr` 前调用 `close()`，并让所属 `IOEventPoll` 驱动完清理；`IOEventPoll` 的生命周期必须长于其管理的 `Conn`。
-- `Server::shutdown()` 和 `Server::close()` 可以跨线程调用。使用 `kOnePollPerThread` 时，主 poll 必须已经在 `run()` 中，或者随后进入 `run()`，关闭流程才能继续推进；应在 `run()` 返回后再析构 `Server`。
-- 不要在 `Server::set_conn_user_callback` 或 `Server::set_error_user_callback` 的回调中调用该 `Server` 的 `shutdown()/close()`，也不要在这些回调中析构该 `Server`。
 - 任何用户回调执行期间，如需对当前 `Conn` 调用 `shutdown()/close()`，不要同步调用；应通过 `Conn::run_later_in_poll()` 投递到所属 `IOEventPoll`，让关闭操作在当前回调返回后执行。所属 poll 必须继续运行，投递的任务才能执行。
 - `Conn` 保存的消息回调是长生命周期回调，应捕获 `weak_ptr`，避免 `Conn -> callback -> Conn` 的引用环。`run_later_in_poll()` 投递的是一次性任务，可以捕获 `ConnPtr`；任务执行并销毁后，引用计数会正常减一。
 
-对端半关闭写方向时，`Conn` 会先交付已收到的数据，并继续发送应用在回调中产生的响应；待写缓冲全部排空后，再完成连接关闭。
+对端半关闭写方向时，`Conn` 会先交付已收到的数据，并继续发送应用在回调中产生的响应；待写缓冲全部排空后，再完成连接关闭。这条自然冲刷路径没有超时上限，慢速但存活的传输会完整送达；只有对连接显式调用 `shutdown()`（或被 `Server::shutdown()` 波及）后，才受 graceful 超时约束。
 
 `SampleClient` 是一个很小的单连接客户端封装。如果需要重连逻辑、连接池、协议客户端或其他高级行为，直接组合使用 `Conn` 和 `IOEventPoll`。
 

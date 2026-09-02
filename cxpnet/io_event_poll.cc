@@ -18,7 +18,7 @@
 
 namespace cxpnet {
   IOEventPoll::IOEventPoll() {
-    thread_id_ = std::this_thread::get_id();
+    RELEASE_STORE(thread_id_, std::this_thread::get_id());
 
 #if CXP_PLATFORM_LINUX
     poller_ = std::make_unique<EpollPoller>(this);
@@ -53,11 +53,15 @@ namespace cxpnet {
   void IOEventPoll::poll() {
     if (ACQUIRE_LOAD(closed_)) { return; }
 
+    RELEASE_STORE(thread_id_, std::this_thread::get_id());
+    RELEASE_STORE(polling_, true);
     poll_(0);
+    RELEASE_STORE(polling_, false);
   }
 
   void IOEventPoll::run() {
-    thread_id_ = std::this_thread::get_id();
+    RELEASE_STORE(thread_id_, std::this_thread::get_id());
+    RELEASE_STORE(polling_, true);
 
     while (!ACQUIRE_LOAD(closed_)) {
       uint32_t poll_timeout = timer_manager_->next_timeout_ms(kMaxIdlePollTimeoutMS);
@@ -66,6 +70,8 @@ namespace cxpnet {
 
     while (run_pending_tasks_()) {
     }
+
+    RELEASE_STORE(polling_, false);
   }
 
   void IOEventPoll::shutdown() {
@@ -96,8 +102,16 @@ namespace cxpnet {
   void IOEventPoll::update_channel(Channel* channel) { poller_->update_channel(channel); }
   void IOEventPoll::unregister_channel(Channel* channel) { poller_->unregister_channel(channel); }
 
-  void IOEventPoll::notify_wakeup_() { Platform::wakeup_write(wakeup_handle_); }
-  void IOEventPoll::handle_wakeup_() { Platform::wakeup_read(wakeup_read_fd_); }
+  // 已有一个未消费的唤醒信号时跳过重复写，减少高频投递下的 eventfd 系统调用
+  void IOEventPoll::notify_wakeup_() {
+    if (!wakeup_pending_.exchange(true, std::memory_order_acq_rel)) {
+      Platform::wakeup_write(wakeup_handle_);
+    }
+  }
+  void IOEventPoll::handle_wakeup_() {
+    Platform::wakeup_read(wakeup_read_fd_);
+    RELEASE_STORE(wakeup_pending_, false);
+  }
 
   bool IOEventPoll::run_pending_tasks_() {
     std::vector<Closure> tmp_tasks;

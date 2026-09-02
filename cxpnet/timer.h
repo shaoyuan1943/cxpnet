@@ -29,7 +29,6 @@ namespace cxpnet {
     uint32_t delay_ms() const { return delay_ms_; }
     bool     cancelled() const { return ACQUIRE_LOAD(cancelled_); }
     void     cancel() { RELEASE_STORE(cancelled_, true); }
-    void     execute() const;
 
     bool operator<(const Timer& other) const { return expire_time_ < other.expire_time_; }
   private:
@@ -52,8 +51,8 @@ namespace cxpnet {
     void                         shutdown();
     uint32_t                     next_timeout_ms(uint32_t default_timeout_ms);
     void                         run_expired();
-    std::vector<Timer::Callback> take_expired_callbacks_();
   private:
+    std::vector<Timer::Callback> take_expired_callbacks_();
     using TimePoint          = std::chrono::steady_clock::time_point;
     using ScheduleMap        = std::multimap<TimePoint, Timer::TimerID>;
     using TimersMap          = std::unordered_map<Timer::TimerID, std::unique_ptr<Timer>>;

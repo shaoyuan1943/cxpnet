@@ -6,7 +6,6 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -23,9 +22,11 @@ namespace cxpnet {
            int           option      = SocketOption::kNone);
     ~Server();
 
-    // graceful close flow
+    // 发起优雅关闭：停止 accept，逐连接发起优雅关闭；不等待收敛，
+    // 需要观察进度时自行轮询 connection_count()
     void shutdown();
-    // close immediately
+    // 立即关闭：强制关闭全部资源并 join poll 线程，返回时清理已完成。
+    // 禁止在 poll 线程（含用户回调）中调用；回调里请用 shutdown()
     void close();
 
     bool start(RunningMode mode);
@@ -46,8 +47,12 @@ namespace cxpnet {
       graceful_close_timeout_ms_ = ms;
     }
     size_t connection_count() const {
-      std::lock_guard<std::mutex> lock(conns_mutex_);
-      return conns_.size();
+      size_t count = 0;
+      for (const auto& shard : conn_shards_) {
+        std::lock_guard<std::mutex> lock(shard->mutex);
+        count += shard->conns.size();
+      }
+      return count;
     }
   private:
     enum class State {
@@ -57,36 +62,32 @@ namespace cxpnet {
       kClosed,
     };
 
-    bool                 try_enter_closing_();
+    bool                 is_in_any_poll_thread_() const;
     std::vector<ConnPtr> snapshot_connections_();
-    void                 try_finish_close_();
-    void                 finish_close_();
-    void                 wait_until_closed_();
-    bool                 is_in_sub_poll_thread_() const;
-    void                 start_close_thread_(Closure func);
-    void                 join_closing_thread_();
     void                 close_polls_();
     State                get_state_() { return ACQUIRE_LOAD(state_); }
 
-    void on_conn_close_(int handle);
+    void on_conn_close_(int shard_index, int handle);
     void on_acceptor_error_(int err);
     void on_poll_error_(IOEventPoll* event_poll, int err);
     void on_new_connection_(int handle, struct sockaddr_storage addr_storage);
   private:
+    // 连接注册表按所属 poll 分片，避免高并发建连/断连时争抢同一把锁
+    struct ConnShard {
+      mutable std::mutex               mutex;
+      std::unordered_map<int, ConnPtr> conns;
+    };
+
     std::unique_ptr<IOEventPoll>              main_poll_ {nullptr};
     std::vector<std::unique_ptr<IOEventPoll>> sub_polls_;
     std::unique_ptr<Acceptor>                 acceptor_ {nullptr};
     std::unique_ptr<PollThreadPool>           poll_thread_pool_ {nullptr};
-    std::thread                               closing_thread_ {};
-    mutable std::mutex                        closing_thread_mutex_;
 
     int                thread_num_ {0};
     std::atomic<State> state_ {State::kCreated};
-    std::atomic<bool>  polls_closed_ {false};
     RunningMode        running_mode_ {RunningMode::kOnePollPerThread};
 
-    std::unordered_map<int, ConnPtr> conns_;
-    mutable std::mutex               conns_mutex_;
+    std::vector<std::unique_ptr<ConnShard>> conn_shards_;
 
     std::function<void(ConnPtr)> on_conn_func_ {nullptr};
     std::function<void(int)>     on_error_func_ {nullptr};

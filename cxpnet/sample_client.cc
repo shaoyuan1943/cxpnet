@@ -50,7 +50,19 @@ namespace cxpnet {
       conn_snapshot = conn_;
     }
 
-    if (conn_snapshot) { conn_snapshot->shutdown(); }
+    if (conn_snapshot) {
+      conn_snapshot->shutdown();
+    } else {
+      // 还没有建立连接（或连接任务尚未执行），直接完成关闭
+      finish_close_if_closing_();
+    }
+  }
+
+  void SampleClient::finish_close_if_closing_() {
+    State expected = State::kClosing;
+    if (state_.compare_exchange_strong(expected, State::kClosed, std::memory_order_acq_rel)) {
+      event_poll_.shutdown();
+    }
   }
 
   void SampleClient::close() {
@@ -111,6 +123,9 @@ namespace cxpnet {
       conn_ = conn;
     }
 
+    // 连接无论以何种方式关闭，都要把 shutdown 流程推进到 kClosed 并停掉事件循环
+    conn->set_internal_close_callback_([this]() { finish_close_if_closing_(); });
+
     auto on_connected     = [this](ConnPtr connected_conn) { on_connected_(connected_conn); };
     auto on_connect_error = [this](int err) { on_connect_error_(err); };
 
@@ -121,7 +136,11 @@ namespace cxpnet {
     std::function<void(ConnPtr)> on_conn_func;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      if (!is_active_()) { return; }
+      if (!is_active_()) {
+        // shutdown/close 已在途中：直接关掉这条迟到的连接，走内部关闭回调收尾
+        conn->run_later_in_poll([conn]() { conn->close(); });
+        return;
+      }
 
       conn_        = conn;
       on_conn_func = on_conn_func_;
@@ -134,11 +153,10 @@ namespace cxpnet {
     std::function<void(int)> on_error_func;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      if (!is_active_()) { return; }
-
-      on_error_func = on_error_func_;
+      if (is_active_()) { on_error_func = on_error_func_; }
     }
 
     if (on_error_func) { on_error_func(err); }
+    finish_close_if_closing_();
   }
 } // namespace cxpnet

@@ -51,6 +51,7 @@ namespace cxpnet {
     void connect_in_poll_();
     void on_connected_(ConnPtr conn);
     void on_connect_error_(int err);
+    void finish_close_if_closing_();
   private:
     std::string                  addr_;
     uint16_t                     port_;

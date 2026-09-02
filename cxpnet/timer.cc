@@ -9,12 +9,6 @@ namespace cxpnet {
     expire_time_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(delay_ms);
   }
 
-  void Timer::execute() const {
-    if (callback_ && !ACQUIRE_LOAD(cancelled_)) {
-      callback_();
-    }
-  }
-
   TimerManager::TimerManager(Closure wakeup_func)
       : wakeup_func_(std::move(wakeup_func)) {}
 

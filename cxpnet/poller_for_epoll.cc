@@ -79,9 +79,10 @@ namespace cxpnet {
     event.data.ptr = channel;
 
     // EPOLL_CTL_DEL 时 fd 可能已经关闭，忽略错误
-    // EPOLL_CTL_MOD/ADD 时 fd 应该有效
+    // 一次性对象设计下，MOD/ADD 时 fd 必须有效，失败即违反契约
     if (epoll_ctl(epoll_fd_, op, channel->handle(), &event) < 0) {
       if (op == EPOLL_CTL_DEL) { return; }
+
       CXPNET_CHECK(false, "epoll_ctl failed for op = {}, fd = {}, errno = {}",
                    op, channel->handle(), errno);
     }

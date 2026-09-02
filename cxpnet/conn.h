@@ -15,6 +15,7 @@ namespace cxpnet {
   class IOEventPoll;
   class Server;
   class Channel;
+  class SampleClient;
 
   class Conn : public NonCopyable
       , public std::enable_shared_from_this<Conn> {
@@ -32,9 +33,11 @@ namespace cxpnet {
 
     bool connect(const char* addr, uint16_t port,
                  std::function<void(ConnPtr)> on_connected,
-                 std::function<void(int)>     on_connect_error = nullptr);
+                 std::function<void(int)>     on_connect_error = nullptr,
+                 uint32_t                     timeout_ms       = 5000);
 
-    bool connect_sync(const char* addr, uint16_t port);
+    // 同步连接：阻塞调用线程直到连接完成或超时；channel 注册仍在所属 poll 线程完成
+    bool connect_sync(const char* addr, uint16_t port, uint32_t timeout_ms = 5000);
 
     void shutdown();
     void close();
@@ -68,13 +71,13 @@ namespace cxpnet {
     }
 
     void set_graceful_close_timeout(uint32_t ms) {
-      graceful_close_timeout_ms_ = ms;
+      RELEASE_STORE(graceful_close_timeout_ms_, ms);
     }
 
     void send(const char* msg, size_t size);
     void send(std::string_view msg);
 
-    std::string state_string();
+    std::string state_string() const;
 
     // NOT thread-safe！
     // Only invoke this function in OnConnectionCallback
@@ -87,6 +90,7 @@ namespace cxpnet {
   private:
     friend class cxpnet::IOEventPoll;
     friend class cxpnet::Server;
+    friend class cxpnet::SampleClient;
 
     void start_();
     void handle_read_event_();
@@ -106,13 +110,18 @@ namespace cxpnet {
     }
 
     // 关闭流程
+    void shutdown_in_poll_(State state);
     void enter_closing_in_poll_();
+    void arm_closing_timer_();
     void cancel_closing_timer_();
     void do_close_in_poll_(int err);
     void finish_close_(int err);
 
-    void start_connect_in_poll_(const char* addr, uint16_t port);
+    // connect 流程
+    void start_connect_in_poll_(const char* addr, uint16_t port, uint32_t timeout_ms);
     void handle_connect_event_();
+    void handle_connect_timeout_();
+    void cancel_connect_timer_();
     void retire_channel_();
   private:
     IOEventPoll*                 event_poll_;
@@ -128,8 +137,9 @@ namespace cxpnet {
     std::unique_ptr<Buffer>      write_buffer_ {nullptr};
     bool                         close_after_write_ {false};
 
-    uint32_t                     graceful_close_timeout_ms_ {500};
+    std::atomic<uint32_t>        graceful_close_timeout_ms_ {500};
     Timer::TimerID               close_timer_id_ {0};
+    Timer::TimerID               connect_timer_id_ {0};
     std::function<void(ConnPtr)> on_connected_func_ {nullptr};
     std::function<void(int)>     on_connect_error_func_ {nullptr};
   };

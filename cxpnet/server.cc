@@ -7,7 +7,6 @@
 #include "sock.h"
 
 #include <format>
-#include <thread>
 
 namespace cxpnet {
   Server::Server(const char* addr, uint16_t port, ProtocolStack proto_stack, int option) {
@@ -22,12 +21,16 @@ namespace cxpnet {
   }
 
   Server::~Server() {
+    // 析构会 join poll 线程并释放 poll 资源；在 poll 线程的事件循环内析构
+    // 等于 join 自己或访问正在执行的对象
+    CXPNET_CHECK(!is_in_any_poll_thread_(), "Server must not be destroyed on a poll thread");
+
     close();
-    wait_until_closed_();
   }
 
   void Server::shutdown() {
-    if (!try_enter_closing_()) { return; }
+    State expected = State::kRunning;
+    if (!state_.compare_exchange_strong(expected, State::kClosing, std::memory_order_acq_rel)) { return; }
 
     if (acceptor_) { acceptor_->close(); }
 
@@ -35,110 +38,50 @@ namespace cxpnet {
       conn->set_graceful_close_timeout(graceful_close_timeout_ms_);
       conn->shutdown();
     }
-
-    try_finish_close_();
   }
 
   void Server::close() {
-    if (get_state_() == State::kClosed) { return; }
+    // close 会 join poll 线程；在 poll 线程里调用等于 join 自己。
+    // 回调里想关停服务器请用 shutdown()，close/析构留给控制线程
+    CXPNET_CHECK(!is_in_any_poll_thread_(), "Server::close must not be called on a poll thread");
 
-    bool entered_closing = try_enter_closing_();
-    if (!entered_closing) {
-      if (get_state_() != State::kClosing) { return; }
+    State state = get_state_();
+    while (state == State::kRunning || state == State::kClosing) {
+      if (state_.compare_exchange_weak(state, State::kClosed, std::memory_order_acq_rel)) { break; }
     }
 
+    if (state == State::kCreated || state == State::kClosed) { return; }
     if (acceptor_) { acceptor_->close(); }
 
     for (auto& conn : snapshot_connections_()) {
       conn->close();
     }
 
-    try_finish_close_();
-  }
-
-  bool Server::try_enter_closing_() {
-    State state = get_state_();
-    if (state == State::kCreated || state == State::kClosed) { return false; }
-    if (state == State::kClosing) { return false; }
-
-    State expected = State::kRunning;
-    return state_.compare_exchange_strong(expected, State::kClosing, std::memory_order_acq_rel);
+    close_polls_();
   }
 
   std::vector<ConnPtr> Server::snapshot_connections_() {
-    std::vector<ConnPtr>        conns_snapshot;
-    std::lock_guard<std::mutex> lock(conns_mutex_);
+    std::vector<ConnPtr> conns_snapshot;
 
-    conns_snapshot.reserve(conns_.size());
-    for (auto& [handle, conn] : conns_) {
-      if (conn) { conns_snapshot.push_back(conn); }
+    for (const auto& shard : conn_shards_) {
+      std::lock_guard<std::mutex> lock(shard->mutex);
+      for (auto& [handle, conn] : shard->conns) {
+        if (conn) { conns_snapshot.push_back(conn); }
+      }
     }
 
     return conns_snapshot;
   }
 
-  void Server::try_finish_close_() {
-    if (ACQUIRE_LOAD(state_) != State::kClosing) { return; }
-    if (connection_count() != 0) { return; }
+  bool Server::is_in_any_poll_thread_() const {
+    // thread_id_ 在 poll 进入驱动前仍是创建线程的 id，is_polling() 用来排除这个窗口
+    if (main_poll_ && main_poll_->is_in_poll_thread() && main_poll_->is_polling()) { return true; }
 
-    bool expected = false;
-    if (!polls_closed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-      return;
-    }
-
-    if (is_in_sub_poll_thread_()) {
-      start_close_thread_([this]() { finish_close_(); });
-      return;
-    }
-
-    finish_close_();
-  }
-
-  void Server::finish_close_() {
-    close_polls_();
-    RELEASE_STORE(state_, State::kClosed);
-  }
-
-  void Server::wait_until_closed_() {
-    while (ACQUIRE_LOAD(state_) == State::kClosing) {
-      if (running_mode_ == RunningMode::kAllOneThread) {
-        poll();
-        continue;
-      }
-
-      std::this_thread::yield();
-    }
-
-    join_closing_thread_();
-  }
-
-  bool Server::is_in_sub_poll_thread_() const {
     for (const auto& poll : sub_polls_) {
-      if (poll && poll->is_in_poll_thread()) { return true; }
+      if (poll && poll->is_in_poll_thread() && poll->is_polling()) { return true; }
     }
 
     return false;
-  }
-
-  void Server::start_close_thread_(Closure func) {
-    std::lock_guard<std::mutex> lock(closing_thread_mutex_);
-    if (closing_thread_.joinable()) {
-      closing_thread_.join();
-    }
-
-    closing_thread_ = std::thread(std::move(func));
-  }
-
-  void Server::join_closing_thread_() {
-    std::lock_guard<std::mutex> lock(closing_thread_mutex_);
-    if (!closing_thread_.joinable()) { return; }
-
-    if (closing_thread_.get_id() == std::this_thread::get_id()) {
-      closing_thread_.detach();
-      return;
-    }
-
-    closing_thread_.join();
   }
 
   void Server::close_polls_() {
@@ -151,8 +94,6 @@ namespace cxpnet {
     if (!state_.compare_exchange_strong(expected, State::kRunning, std::memory_order_acq_rel)) {
       return false;
     }
-
-    RELEASE_STORE(polls_closed_, false);
 
     running_mode_ = mode;
 
@@ -178,6 +119,13 @@ namespace cxpnet {
       // PollThreadPool only use IOEventPoll, not control IOEventPoll
       poll_thread_pool_ = std::make_unique<PollThreadPool>(polls);
       poll_thread_pool_->start();
+
+      conn_shards_.reserve(thread_num_);
+      for (int i = 0; i < thread_num_; ++i) {
+        conn_shards_.push_back(std::make_unique<ConnShard>());
+      }
+    } else {
+      conn_shards_.push_back(std::make_unique<ConnShard>());
     }
 
     if (!acceptor_->listen()) {
@@ -194,6 +142,7 @@ namespace cxpnet {
 
     State state = ACQUIRE_LOAD(state_);
     if (state == State::kCreated || state == State::kClosed) { return; }
+
     main_poll_->run();
   }
 
@@ -203,17 +152,16 @@ namespace cxpnet {
     State state = ACQUIRE_LOAD(state_);
     if (state == State::kCreated || state == State::kClosed) { return; }
 
+    // kClosing 期间继续驱动：shutdown 进展（连接冲刷、关闭定时器）由 poll 推进
     main_poll_->poll();
-    try_finish_close_();
   }
 
-  void Server::on_conn_close_(int handle) {
-    {
-      std::lock_guard<std::mutex> lock(conns_mutex_);
-      conns_.erase(handle);
+  void Server::on_conn_close_(int shard_index, int handle) {
+    if (shard_index >= 0 && shard_index < static_cast<int>(conn_shards_.size())) {
+      auto&                       shard = conn_shards_[shard_index];
+      std::lock_guard<std::mutex> lock(shard->mutex);
+      shard->conns.erase(handle);
     }
-
-    try_finish_close_();
   }
 
   void Server::on_acceptor_error_(int err) {
@@ -240,16 +188,13 @@ namespace cxpnet {
       return;
     }
 
-    {
-      std::lock_guard<std::mutex> lock(conns_mutex_);
-      if (max_connections_ > 0 && conns_.size() >= max_connections_) {
-        Platform::close_handle(handle);
-        if (on_error_func_ != nullptr) {
-          on_error_func_(EMFILE);
-        }
-
-        return;
+    if (max_connections_ > 0 && connection_count() >= max_connections_) {
+      Platform::close_handle(handle);
+      if (on_error_func_ != nullptr) {
+        on_error_func_(EMFILE);
       }
+
+      return;
     }
 
     char     client_ip_str[INET6_ADDRSTRLEN] = {0};
@@ -270,29 +215,39 @@ namespace cxpnet {
       return;
     }
 
-    IOEventPoll* event_poll = nullptr;
+    IOEventPoll* event_poll  = nullptr;
+    int          shard_index = 0;
     if (running_mode_ == RunningMode::kOnePollPerThread) {
       event_poll = poll_thread_pool_->next_poll();
       CXPNET_CHECK(event_poll != nullptr, "Invalid event_poll");
+
+      // thread_num_ 上限 24，线性查找分片下标的开销相对 accept 可忽略
+      for (size_t i = 0; i < sub_polls_.size(); ++i) {
+        if (sub_polls_[i].get() == event_poll) {
+          shard_index = static_cast<int>(i);
+          break;
+        }
+      }
     } else {
       event_poll = main_poll_.get();
     }
 
     auto conn = std::make_shared<Conn>(event_poll, handle);
     conn->set_remote_addr_(client_ip_str, client_port);
-    conn->set_internal_close_callback_([this, handle]() {
-      on_conn_close_(handle);
+    conn->set_internal_close_callback_([this, shard_index, handle]() {
+      on_conn_close_(shard_index, handle);
     });
 
     {
-      std::lock_guard<std::mutex> lock(conns_mutex_);
-      conns_[handle] = conn;
+      auto&                       shard = conn_shards_[shard_index];
+      std::lock_guard<std::mutex> lock(shard->mutex);
+      shard->conns[handle] = conn;
     }
 
     auto on_conn_func = on_conn_func_;
-    event_poll->run_in_poll([this, handle, conn, on_conn_func]() {
+    event_poll->run_in_poll([this, shard_index, handle, conn, on_conn_func]() {
       if (ACQUIRE_LOAD(state_) != State::kRunning) {
-        on_conn_close_(handle);
+        on_conn_close_(shard_index, handle);
         if (conn->handle_ != invalid_socket) {
           Platform::close_handle(conn->handle_);
           conn->handle_ = invalid_socket;

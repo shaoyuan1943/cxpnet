@@ -33,7 +33,9 @@ namespace cxpnet {
       return;
     }
 
-    if (event_poll_->is_shutdown()) {
+    // poll 从未进入或已经离开驱动循环时，同步等待会永久挂起，直接本地关闭；
+    // 此时不存在并发的事件处理，fd 关闭后由内核自动从 epoll/kqueue 移除
+    if (event_poll_->is_shutdown() || !event_poll_->is_polling()) {
       close_local_();
       return;
     }

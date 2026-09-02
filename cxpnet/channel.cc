@@ -64,7 +64,7 @@ namespace cxpnet {
 
   void Channel::handle_event_() {
     if (result_events_ & events::kError) {
-      int err = 0;
+      int       err     = 0;
       socklen_t err_len = sizeof(err);
       getsockopt(handle_, SOL_SOCKET, SO_ERROR, &err, &err_len);
 
