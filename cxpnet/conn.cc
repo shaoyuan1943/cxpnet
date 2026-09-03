@@ -330,7 +330,6 @@ namespace cxpnet {
     if (internal_close_callback) { internal_close_callback(); }
     if (close_func) { close_func(err); }
 
-    // 用户回调可能强捕获 Conn 自身；连接已进入终态，清空回调打断引用环
     on_message_func_       = nullptr;
     on_connected_func_     = nullptr;
     on_connect_error_func_ = nullptr;
