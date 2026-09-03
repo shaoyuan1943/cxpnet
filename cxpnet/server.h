@@ -1,4 +1,4 @@
-﻿#ifndef SERVER_H
+#ifndef SERVER_H
 #define SERVER_H
 
 #include "sock.h"
@@ -29,11 +29,11 @@ namespace cxpnet {
     // 禁止在 poll 线程（含用户回调）中调用；回调里请用 shutdown()
     void close();
 
-    bool start(RunningMode mode);
+    // thread_num 仅对 kOnePollPerThread 有效（1..24）；kAllOneThread 下忽略
+    bool start(RunningMode mode, int thread_num = 0);
     void run();  // blocking
     void poll(); // non-blocking
 
-    void set_thread_num(int n) { thread_num_ = n; }
     void set_conn_user_callback(std::function<void(ConnPtr)> func) {
       on_conn_func_ = std::move(func);
     }
@@ -83,7 +83,6 @@ namespace cxpnet {
     std::unique_ptr<Acceptor>                 acceptor_ {nullptr};
     std::unique_ptr<PollThreadPool>           poll_thread_pool_ {nullptr};
 
-    int                thread_num_ {0};
     std::atomic<State> state_ {State::kCreated};
     RunningMode        running_mode_ {RunningMode::kOnePollPerThread};
 

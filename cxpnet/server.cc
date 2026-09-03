@@ -87,7 +87,7 @@ namespace cxpnet {
     if (main_poll_) { main_poll_->shutdown(); }
   }
 
-  bool Server::start(RunningMode mode) {
+  bool Server::start(RunningMode mode, int thread_num) {
     State expected = State::kCreated;
     if (!state_.compare_exchange_strong(expected, State::kRunning, std::memory_order_acq_rel)) {
       return false;
@@ -97,15 +97,15 @@ namespace cxpnet {
 
     constexpr int kMaxThreadNum = 24;
     if (running_mode_ == RunningMode::kOnePollPerThread) {
-      if (thread_num_ <= 0 || thread_num_ > kMaxThreadNum) {
+      if (thread_num <= 0 || thread_num > kMaxThreadNum) {
         RELEASE_STORE(state_, State::kClosed);
         return false;
       }
 
-      sub_polls_.reserve(thread_num_);
+      sub_polls_.reserve(thread_num);
       std::vector<IOEventPoll*> polls;
-      polls.reserve(thread_num_);
-      for (int i = 0; i < thread_num_; ++i) {
+      polls.reserve(thread_num);
+      for (int i = 0; i < thread_num; ++i) {
         auto poll = std::make_unique<IOEventPoll>();
         poll->set_name(std::format("sub_poll_{}", i + 1));
         poll->set_error_callback(std::bind(&Server::on_poll_error_, this, std::placeholders::_1, std::placeholders::_2));
@@ -118,8 +118,8 @@ namespace cxpnet {
       poll_thread_pool_ = std::make_unique<PollThreadPool>(polls);
       poll_thread_pool_->start();
 
-      conn_shards_.reserve(thread_num_);
-      for (int i = 0; i < thread_num_; ++i) {
+      conn_shards_.reserve(thread_num);
+      for (int i = 0; i < thread_num; ++i) {
         conn_shards_.push_back(std::make_unique<ConnShard>());
       }
     } else {
@@ -214,7 +214,7 @@ namespace cxpnet {
       event_poll = poll_thread_pool_->next_poll();
       CXPNET_CHECK(event_poll != nullptr, "Invalid event_poll");
 
-      // thread_num_ 上限 24，线性查找分片下标的开销相对 accept 可忽略
+      // sub poll 上限 24，线性查找分片下标的开销相对 accept 可忽略
       for (size_t i = 0; i < sub_polls_.size(); ++i) {
         if (sub_polls_[i].get() == event_poll) {
           shard_index = static_cast<int>(i);

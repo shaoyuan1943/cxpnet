@@ -231,7 +231,6 @@ HTTP：
 
 int main() {
   cxpnet::Server server("127.0.0.1", 9090);
-  server.set_thread_num(1);
   server.set_conn_user_callback([](cxpnet::ConnPtr conn) {
     std::weak_ptr<cxpnet::Conn> weak_conn = conn;
     conn->set_message_callback([weak_conn](std::string_view data) {
@@ -242,7 +241,7 @@ int main() {
     conn->set_close_callback([](int) {});
   });
 
-  if (!server.start(cxpnet::RunningMode::kOnePollPerThread)) {
+  if (!server.start(cxpnet::RunningMode::kOnePollPerThread, 1)) {
     return 1;
   }
 
@@ -314,7 +313,7 @@ int main() {
 
 典型起点：
 
-- 专用网络线程：`set_thread_num(1)` + `start(RunningMode::kOnePollPerThread)` + `run()`
+- 专用网络线程：`start(RunningMode::kOnePollPerThread, 1)` + `run()`
 - 应用托管主循环：`start(RunningMode::kAllOneThread)` + 重复调用 `poll()`
 - 单线程阻塞服务：`start(RunningMode::kAllOneThread)` + `run()`——accept 与连接 IO 全在调用线程，适合不想自建循环的小服务
-- tick 循环宿主（如游戏服务端）：`set_thread_num(1)` + `start(RunningMode::kOnePollPerThread)` + 主循环逐帧调用 `poll()`——accept 由主循环泵动，连接 IO 由 1 条网络线程阻塞驱动。`run()`/`poll()` 在两种运行模式下都可用：二者只决定 main poll 的驱动方式（阻塞或单次），运行模式只决定连接分配到哪个 poll。
+- tick 循环宿主（如游戏服务端）：`start(RunningMode::kOnePollPerThread, 1)` + 主循环逐帧调用 `poll()`——accept 由主循环泵动，连接 IO 由 1 条网络线程阻塞驱动。`run()`/`poll()` 在两种运行模式下都可用：二者只决定 main poll 的驱动方式（阻塞或单次），运行模式只决定连接分配到哪个 poll。`thread_num` 仅对 `kOnePollPerThread` 有效（1..24），`kAllOneThread` 下忽略。

@@ -23,7 +23,6 @@ int main(int argc, char* argv[]) {
   uint16_t    port = argc > 2 ? static_cast<uint16_t>(std::atoi(argv[2])) : 8080;
   cxpnet::Server server(host, port, cxpnet::ProtocolStack::kIPv4Only, cxpnet::SocketOption::kReuseAddr);
 
-  server.set_thread_num(1);
   server.set_conn_user_callback([](cxpnet::ConnPtr conn) {
     std::weak_ptr<cxpnet::Conn> weak_conn = conn;
     conn->set_message_callback([weak_conn](std::string_view data) {
@@ -46,7 +45,7 @@ int main(int argc, char* argv[]) {
     });
   });
 
-  if (!server.start(cxpnet::RunningMode::kOnePollPerThread)) {
+  if (!server.start(cxpnet::RunningMode::kOnePollPerThread, 1)) {
     std::cerr << "failed to start http server" << std::endl;
     return 1;
   }

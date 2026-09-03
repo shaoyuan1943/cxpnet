@@ -12,7 +12,6 @@ int main(int argc, char* argv[]) {
   const int    poll_threads = argc > 3 ? std::atoi(argv[3]) : 1;
   cxpnet::Server server(host, port, cxpnet::ProtocolStack::kIPv4Only, cxpnet::SocketOption::kReuseAddr);
 
-  server.set_thread_num(poll_threads);
   server.set_conn_user_callback([](cxpnet::ConnPtr conn) {
     std::cout << "client connected: " << conn->remote_addr_and_port().first
               << ":" << conn->remote_addr_and_port().second << std::endl;
@@ -28,7 +27,7 @@ int main(int argc, char* argv[]) {
     });
   });
 
-  if (!server.start(cxpnet::RunningMode::kOnePollPerThread)) {
+  if (!server.start(cxpnet::RunningMode::kOnePollPerThread, poll_threads)) {
     std::cerr << "failed to start echo server" << std::endl;
     return 1;
   }
