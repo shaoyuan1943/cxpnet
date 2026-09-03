@@ -21,8 +21,6 @@ namespace cxpnet {
     State old_state = state_.exchange(State::kClosed, std::memory_order_acq_rel);
     if (old_state != State::kListening) { return; }
 
-    // 正常路径由 Server 投递到 main poll 的驱动线程执行；
-    // 其余仅在 poll 已终止或从未驱动的析构兜底路径到达，不存在并发的事件处理
     if (event_poll_ != nullptr && event_poll_->is_in_poll_thread()) {
       close_in_poll_();
       return;
