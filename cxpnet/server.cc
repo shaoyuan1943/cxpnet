@@ -73,7 +73,6 @@ namespace cxpnet {
   }
 
   bool Server::is_in_any_poll_thread_() const {
-    // thread_id_ 在 poll 进入驱动前仍是创建线程的 id，is_polling() 用来排除这个窗口
     if (main_poll_ && main_poll_->is_in_poll_thread() && main_poll_->is_polling()) { return true; }
 
     for (const auto& poll : sub_polls_) {
