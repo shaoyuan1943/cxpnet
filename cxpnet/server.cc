@@ -21,19 +21,6 @@ namespace cxpnet {
   }
 
   Server::~Server() {
-    // 析构会 join poll 线程并释放 poll 资源；在 poll 线程的事件循环内析构
-    // 等于 join 自己或访问正在执行的对象。
-    // Release 下 CHECK 以抛异常失败，析构内抛异常即 terminate——这正是
-    // 违例时想要的 fail-fast 行为，抑制编译器告警即可
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wterminate"
-#endif
-    CXPNET_CHECK(!is_in_any_poll_thread_(), "Server must not be destroyed on a poll thread");
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-
     close();
   }
 
@@ -41,7 +28,10 @@ namespace cxpnet {
     State expected = State::kRunning;
     if (!state_.compare_exchange_strong(expected, State::kClosing, std::memory_order_acq_rel)) { return; }
 
-    if (acceptor_) { acceptor_->close(); }
+    // acceptor 的实际关闭投递给 main poll 的驱动线程执行，
+    // 任何运行模式/驱动方式下都不会与事件派发并发
+    Acceptor* acceptor = acceptor_.get();
+    main_poll_->run_in_poll([acceptor]() { acceptor->close(); });
 
     for (auto& conn : snapshot_connections_()) {
       conn->set_graceful_close_timeout(graceful_close_timeout_ms_);
@@ -50,8 +40,6 @@ namespace cxpnet {
   }
 
   void Server::close() {
-    // close 会 join poll 线程；在 poll 线程里调用等于 join 自己。
-    // 回调里想关停服务器请用 shutdown()，close/析构留给控制线程
     CXPNET_CHECK(!is_in_any_poll_thread_(), "Server::close must not be called on a poll thread");
 
     State state = get_state_();
@@ -60,7 +48,9 @@ namespace cxpnet {
     }
 
     if (state == State::kCreated || state == State::kClosed) { return; }
-    if (acceptor_) { acceptor_->close(); }
+
+    Acceptor* acceptor = acceptor_.get();
+    main_poll_->run_in_poll([acceptor]() { acceptor->close(); });
 
     for (auto& conn : snapshot_connections_()) {
       conn->close();
@@ -147,8 +137,6 @@ namespace cxpnet {
   }
 
   void Server::run() {
-    CXPNET_CHECK(running_mode_ == RunningMode::kOnePollPerThread, "");
-
     State state = ACQUIRE_LOAD(state_);
     if (state == State::kCreated || state == State::kClosed) { return; }
 
@@ -156,12 +144,9 @@ namespace cxpnet {
   }
 
   void Server::poll() {
-    CXPNET_CHECK(running_mode_ == RunningMode::kAllOneThread, "");
-
     State state = ACQUIRE_LOAD(state_);
-    if (state == State::kCreated || state == State::kClosed) { return; }
+    if (state == State::kCreated) { return; }
 
-    // kClosing 期间继续驱动：shutdown 进展（连接冲刷、关闭定时器）由 poll 推进
     main_poll_->poll();
   }
 

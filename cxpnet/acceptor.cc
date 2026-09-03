@@ -1,9 +1,7 @@
-﻿#include "acceptor.h"
+#include "acceptor.h"
 #include "channel.h"
 #include "io_event_poll.h"
 #include "platform_api.h"
-
-#include <future>
 
 namespace cxpnet {
   Acceptor::Acceptor(IOEventPoll* event_poll)
@@ -23,37 +21,21 @@ namespace cxpnet {
     State old_state = state_.exchange(State::kClosed, std::memory_order_acq_rel);
     if (old_state != State::kListening) { return; }
 
-    if (event_poll_ == nullptr) {
-      close_local_();
-      return;
-    }
-
-    if (event_poll_->is_in_poll_thread()) {
+    // 正常路径由 Server 投递到 main poll 的驱动线程执行；
+    // 其余仅在 poll 已终止或从未驱动的析构兜底路径到达，不存在并发的事件处理
+    if (event_poll_ != nullptr && event_poll_->is_in_poll_thread()) {
       close_in_poll_();
       return;
     }
 
-    // poll 从未进入或已经离开驱动循环时，同步等待会永久挂起，直接本地关闭；
-    // 此时不存在并发的事件处理，fd 关闭后由内核自动从 epoll/kqueue 移除
-    if (event_poll_->is_shutdown() || !event_poll_->is_polling()) {
-      close_local_();
-      return;
-    }
-
-    // Acceptor is expected to be closed before its owner poll stops.
-    auto done   = std::make_shared<std::promise<void>>();
-    auto future = done->get_future();
-
-    event_poll_->run_in_poll([this, done]() {
-      close_in_poll_();
-      done->set_value();
-    });
-
-    future.get();
+    close_local_();
   }
 
   void Acceptor::close_local_() {
-    channel_.reset();
+    if (channel_) {
+      if (event_poll_ != nullptr) { channel_->unregister(); }
+      channel_.reset();
+    }
 
     if (listen_handle_ != invalid_socket) {
       Platform::close_handle(listen_handle_);

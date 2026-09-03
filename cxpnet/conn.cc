@@ -1,4 +1,4 @@
-﻿#include "conn.h"
+#include "conn.h"
 #include "channel.h"
 #include "check.h"
 #include "io_event_poll.h"
@@ -128,8 +128,8 @@ namespace cxpnet {
 
     handle_  = handle;
     channel_ = std::make_unique<Channel>(event_poll_, handle_);
-    channel_->set_write_callback([this]() { handle_connect_event_(); });
-    channel_->set_close_callback([this](int) { handle_connect_event_(); });
+    channel_->set_write_callback([this]() { handle_connect_event_(0); });
+    channel_->set_close_callback([this](int err) { handle_connect_event_(err); });
     channel_->tie(shared_from_this());
     channel_->add_write_event();
 
@@ -182,16 +182,19 @@ namespace cxpnet {
     event_poll_->run_later([old_channel]() {});
   }
 
-  void Conn::handle_connect_event_() {
+  void Conn::handle_connect_event_(int err) {
     CXPNET_CHECK(event_poll_->is_in_poll_thread(), "Must in IO thread");
 
     if (get_state_() != State::kConnecting) { return; }
     cancel_connect_timer_();
 
-    int       err = 0;
-    socklen_t len = sizeof(err);
-    if (getsockopt(handle_, SOL_SOCKET, SO_ERROR, &err, &len) < 0) {
-      err = Platform::get_last_error();
+    // err == 0 来自写事件/HUP 路径，Channel 未预取 SO_ERROR，需要自行读取；
+    // 非 0 来自 Channel 的 EPOLLERR 分支——SO_ERROR 读一次即被清除，不能重读
+    if (err == 0) {
+      socklen_t len = sizeof(err);
+      if (getsockopt(handle_, SOL_SOCKET, SO_ERROR, &err, &len) < 0) {
+        err = Platform::get_last_error();
+      }
     }
 
     if (err != 0) {
@@ -328,9 +331,9 @@ namespace cxpnet {
     if (close_func) { close_func(err); }
 
     // 用户回调可能强捕获 Conn 自身；连接已进入终态，清空回调打断引用环
-    on_message_func_        = nullptr;
-    on_connected_func_      = nullptr;
-    on_connect_error_func_  = nullptr;
+    on_message_func_       = nullptr;
+    on_connected_func_     = nullptr;
+    on_connect_error_func_ = nullptr;
 
     if (channel_) {
       Channel* raw_channel    = channel_.release();
@@ -380,9 +383,7 @@ namespace cxpnet {
 
   void Conn::start_() {
     CXPNET_CHECK(event_poll_->is_in_poll_thread(), "Must in IO thread");
-
-    if (handle_ == invalid_socket) { return; }
-    if (is_connected()) { return; }
+    if (handle_ == invalid_socket || is_connected()) { return; }
 
     if (!read_buffer_) { read_buffer_ = std::make_unique<Buffer>(); }
     if (!write_buffer_) { write_buffer_ = std::make_unique<Buffer>(); }

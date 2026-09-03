@@ -153,10 +153,18 @@ namespace cxpnet {
     std::function<void(int)> on_error_func;
     {
       std::lock_guard<std::mutex> lock(mutex_);
+      conn_.reset(); // 失败的 Conn 已进入终态，解除持有
       if (is_active_()) { on_error_func = on_error_func_; }
     }
 
     if (on_error_func) { on_error_func(err); }
+
+    // 连接失败即终态：主动推进到 kClosed 并停掉事件循环，避免 run()/poll() 空转
+    State expected = State::kRunning;
+    if (state_.compare_exchange_strong(expected, State::kClosed, std::memory_order_acq_rel)) {
+      event_poll_.shutdown();
+      return;
+    }
     finish_close_if_closing_();
   }
 } // namespace cxpnet

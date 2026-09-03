@@ -51,11 +51,15 @@ namespace cxpnet {
   }
 
   void IOEventPoll::poll() {
-    if (ACQUIRE_LOAD(closed_)) { return; }
-
     RELEASE_STORE(thread_id_, std::this_thread::get_id());
     RELEASE_STORE(polling_, true);
-    poll_(0);
+
+    if (!ACQUIRE_LOAD(closed_)) {
+      poll_(0);
+    }
+
+    while (run_pending_tasks_()) {}
+
     RELEASE_STORE(polling_, false);
   }
 
@@ -68,8 +72,7 @@ namespace cxpnet {
       poll_(poll_timeout);
     }
 
-    while (run_pending_tasks_()) {
-    }
+    while (run_pending_tasks_()) {};
 
     RELEASE_STORE(polling_, false);
   }

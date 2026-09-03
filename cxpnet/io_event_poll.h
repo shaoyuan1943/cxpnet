@@ -22,8 +22,8 @@ namespace cxpnet {
     IOEventPoll();
     ~IOEventPoll();
 
-    void poll(); // non-blocking
-    void run();  // blocking
+    void poll();
+    void run();
     void shutdown();
     void run_in_poll(Closure func);
     void run_later(Closure func);

@@ -1,4 +1,4 @@
-﻿#ifndef CONN_H
+#ifndef CONN_H
 #define CONN_H
 
 #include "buffer.h"
@@ -119,7 +119,7 @@ namespace cxpnet {
 
     // connect 流程
     void start_connect_in_poll_(const char* addr, uint16_t port, uint32_t timeout_ms);
-    void handle_connect_event_();
+    void handle_connect_event_(int err);
     void handle_connect_timeout_();
     void cancel_connect_timer_();
     void retire_channel_();
