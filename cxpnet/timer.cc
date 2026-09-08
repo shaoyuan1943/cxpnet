@@ -22,13 +22,11 @@ namespace cxpnet {
 
       if (!ACQUIRE_LOAD(running_)) { return 0; }
 
-      id                    = next_id_++;
-      auto timer            = std::make_unique<Timer>(id, delay_ms, std::move(cb));
-      auto when             = timer->expire_time_;
-      should_wakeup         = schedule_.empty() || when < schedule_.begin()->first;
-      auto it               = schedule_.emplace(when, id);
-      scheduled_timers_[id] = it;
-      timers_[id]           = std::move(timer);
+      id            = next_id_++;
+      auto when     = std::chrono::steady_clock::now() + std::chrono::milliseconds(delay_ms);
+      should_wakeup = schedule_.empty() || when < schedule_.begin()->first;
+      auto it       = schedule_.emplace(when, TimerEntry {id, std::move(cb)});
+      timer_index_.emplace(id, it);
     }
 
     if (should_wakeup && wakeup_func_) { wakeup_func_(); }
@@ -42,19 +40,13 @@ namespace cxpnet {
 
       if (!ACQUIRE_LOAD(running_)) { return; }
 
-      auto timer_it = timers_.find(id);
-      if (timer_it == timers_.end()) { return; }
+      auto index_it = timer_index_.find(id);
+      if (index_it == timer_index_.end()) { return; }
 
-      timer_it->second->cancel();
-
-      auto scheduled_it = scheduled_timers_.find(id);
-      if (scheduled_it != scheduled_timers_.end()) {
-        should_wakeup = scheduled_it->second == schedule_.begin();
-        schedule_.erase(scheduled_it->second);
-        scheduled_timers_.erase(scheduled_it);
-      }
-
-      timers_.erase(timer_it);
+      auto scheduled_it = index_it->second;
+      should_wakeup     = scheduled_it == schedule_.begin();
+      timer_index_.erase(index_it);
+      schedule_.erase(scheduled_it);
     }
 
     if (should_wakeup && wakeup_func_) { wakeup_func_(); }
@@ -64,8 +56,7 @@ namespace cxpnet {
     if (!running_.exchange(false, std::memory_order_acq_rel)) { return; }
 
     std::lock_guard<std::mutex> lock(mutex_);
-    timers_.clear();
-    scheduled_timers_.clear();
+    timer_index_.clear();
     schedule_.clear();
   }
 
@@ -92,6 +83,7 @@ namespace cxpnet {
     auto expired_callbacks = take_expired_callbacks_();
     for (auto& callback : expired_callbacks) {
       if (!ACQUIRE_LOAD(running_)) { break; }
+
       if (callback) { callback(); }
     }
   }
@@ -107,19 +99,9 @@ namespace cxpnet {
       auto scheduled_it = schedule_.begin();
       if (scheduled_it->first > now) { break; }
 
-      Timer::TimerID id = scheduled_it->second;
+      expired_callbacks.push_back(std::move(scheduled_it->second.callback));
+      timer_index_.erase(scheduled_it->second.id);
       schedule_.erase(scheduled_it);
-      scheduled_timers_.erase(id);
-
-      auto timer_it = timers_.find(id);
-      if (timer_it == timers_.end()) { continue; }
-      if (timer_it->second->cancelled()) {
-        timers_.erase(timer_it);
-        continue;
-      }
-
-      expired_callbacks.push_back(std::move(timer_it->second->callback_));
-      timers_.erase(timer_it);
     }
 
     return expired_callbacks;
