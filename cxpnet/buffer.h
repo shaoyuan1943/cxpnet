@@ -20,9 +20,9 @@ namespace cxpnet {
       read_index_  = 0;
     }
 
-    Buffer(const char* data, size_t size) noexcept {
+    Buffer(const char* data, size_t size) {
       data_ = new char[size];
-      std::memcpy(data_, data, size);
+      if (size != 0) { std::memcpy(data_, data, size); }
       capacity_    = size;
       write_index_ = size;
       read_index_  = 0;
@@ -60,7 +60,9 @@ namespace cxpnet {
 
     ~Buffer() { delete[] data_; }
 
-    void   clear() { read_index_ = write_index_ = 0; }
+    void clear() {
+      read_index_ = write_index_ = 0;
+    }
     bool   empty() const { return readable_size() == 0; }
     size_t readable_size() const { return write_index_ - read_index_; }
     size_t writable_size() const { return capacity_ - write_index_; }
@@ -81,7 +83,9 @@ namespace cxpnet {
         shrink_if_needed_();
       }
     }
-    void consume_all() { consume(readable_size()); }
+    void consume_all() {
+      consume(readable_size());
+    }
 
     char* writable_data() { return data_ + write_index_; }
     void  commit_write(size_t len) {
@@ -89,7 +93,9 @@ namespace cxpnet {
       write_index_ += len;
     }
 
-    void append(std::string_view data) { append(data.data(), data.size()); }
+    void append(std::string_view data) {
+      append(data.data(), data.size());
+    }
     void append(const char* data, size_t len) {
       CXPNET_CHECK(len > 0, "append size must > 0");
       ensure_writable_size(len);
@@ -110,13 +116,13 @@ namespace cxpnet {
           write_index_ = written_size;
         } else {
           size_t written_size = readable_size();
-          size_t new_capacity = capacity_;
+          size_t new_capacity = (std::max)(capacity_, size_t {1});
           size_t required     = written_size + len;
           while (new_capacity < required) {
             new_capacity *= 2;
           }
           char* new_buffer = new char[new_capacity];
-          std::memcpy(new_buffer, readable_data(), written_size);
+          if (written_size != 0) { std::memcpy(new_buffer, readable_data(), written_size); }
           delete[] data_;
           data_        = new_buffer;
           capacity_    = new_capacity;

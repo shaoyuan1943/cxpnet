@@ -19,7 +19,6 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   add_compile_options(/W4)
 endif()
 
-set(CMAKE_REQUIRED_FLAGS "-std=c++20")
 check_cxx_source_compiles("
   #include <format>
   #include <string>
@@ -28,7 +27,6 @@ check_cxx_source_compiles("
     return msg == \"42\" ? 0 : 1;
   }
 " CXP_HAS_STD_FORMAT)
-unset(CMAKE_REQUIRED_FLAGS)
 
 if(NOT CXP_HAS_STD_FORMAT)
   message(FATAL_ERROR
@@ -38,16 +36,16 @@ endif()
 
 # Platform detection
 set(CXP_PLATFORM_LINUX OFF)
-set(CXP_PLATFORM_MACOS OFF)
+set(CXPNET_PLATFORM_WINDOWS OFF)
 
-if(UNIX AND NOT APPLE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(CXP_PLATFORM_LINUX ON)
   message(STATUS "Platform: Linux (epoll)")
-elseif(APPLE)
-  set(CXP_PLATFORM_MACOS ON)
-  message(STATUS "Platform: macOS (kqueue)")
+elseif(WIN32)
+  set(CXPNET_PLATFORM_WINDOWS ON)
+  message(STATUS "Platform: Windows (WSAPoll)")
 else()
-  message(FATAL_ERROR "Unsupported platform: cxpnet only supports Linux and macOS")
+  message(FATAL_ERROR "Unsupported platform: cxpnet only supports Linux and Windows")
 endif()
 
 # Common source files
@@ -70,10 +68,10 @@ if(CXP_PLATFORM_LINUX)
     cxpnet/platform_api_for_linux.cc
     cxpnet/poller_for_epoll.cc
   )
-elseif(CXP_PLATFORM_MACOS)
+elseif(CXPNET_PLATFORM_WINDOWS)
   list(APPEND PLATFORM_SOURCES
-    cxpnet/platform_api_for_macos.cc
-    cxpnet/poller_for_kqueue.cc
+    cxpnet/platform_api_for_windows.cc
+    cxpnet/poller_for_wsapoll.cc
   )
 endif()
 
@@ -85,6 +83,11 @@ add_library(cxpnet STATIC
 
 # Create an alias target so that cxpnet can be used as cxpnet::cxpnet
 add_library(cxpnet::cxpnet ALIAS cxpnet)
+target_compile_features(cxpnet PUBLIC cxx_std_20)
+if(MSVC)
+  # Public headers use C++20 __VA_OPT__ and contain UTF-8 comments.
+  target_compile_options(cxpnet PUBLIC /Zc:preprocessor /utf-8)
+endif()
 
 # Public usage is:
 #   #include <cxpnet/cxpnet.h>
@@ -98,12 +101,14 @@ target_include_directories(cxpnet PUBLIC
 # Platform-specific definitions
 if(CXP_PLATFORM_LINUX)
   target_compile_definitions(cxpnet PRIVATE CXP_PLATFORM_LINUX=1)
-elseif(CXP_PLATFORM_MACOS)
-  target_compile_definitions(cxpnet PRIVATE CXP_PLATFORM_MACOS=1)
+elseif(CXPNET_PLATFORM_WINDOWS)
+  target_compile_definitions(cxpnet PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
 
 # Link libraries
-if(UNIX)
+if(CXPNET_PLATFORM_WINDOWS)
+  target_link_libraries(cxpnet PUBLIC Ws2_32)
+elseif(CXP_PLATFORM_LINUX)
   find_package(Threads REQUIRED)
   target_link_libraries(cxpnet PUBLIC Threads::Threads)
 endif()

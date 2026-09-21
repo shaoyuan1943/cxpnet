@@ -1,4 +1,4 @@
-﻿#ifndef ACCEPTOR_H
+#ifndef ACCEPTOR_H
 #define ACCEPTOR_H
 
 #include "sock.h"
@@ -32,7 +32,7 @@ namespace cxpnet {
     bool is_listening() const {
       return get_state_() == State::kListening;
     }
-    void set_new_conn_callback(std::function<void(int, struct sockaddr_storage)>&& func) {
+    void set_new_conn_callback(std::function<void(socket_t, struct sockaddr_storage)>&& func) {
       on_conn_func_ = std::move(func);
     }
     void set_error_callback(std::function<void(int)>&& func) {
@@ -45,11 +45,11 @@ namespace cxpnet {
     void  set_state_(State s) { RELEASE_STORE(state_, s); }
     State get_state_() const { return ACQUIRE_LOAD(state_); }
   private:
-    using HandlesListType           = std::vector<std::pair<int, struct sockaddr_storage>>;
-    using NewConnectionCallbackType = std::function<void(int, struct sockaddr_storage)>;
+    using HandlesListType           = std::vector<std::pair<socket_t, struct sockaddr_storage>>;
+    using NewConnectionCallbackType = std::function<void(socket_t, struct sockaddr_storage)>;
 
     IOEventPoll*              event_poll_;
-    int                       listen_handle_ {invalid_socket};
+    socket_t                  listen_handle_ {invalid_socket};
     std::unique_ptr<Channel>  channel_ {nullptr};
     std::atomic<State>        state_ {State::kCreated};
     int                       sock_option_ {SocketOption::kNone};

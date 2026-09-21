@@ -31,7 +31,10 @@ namespace cxpnet {
 
   void Acceptor::close_local_() {
     if (channel_) {
-      if (event_poll_ != nullptr) { channel_->unregister(); }
+      if (event_poll_ != nullptr) {
+        channel_->unregister();
+      }
+
       channel_.reset();
     }
 
@@ -75,12 +78,17 @@ namespace cxpnet {
 
     int err = Platform::accept(listen_handle_, accepted_handles_);
     if (err != 0) {
-      if (on_err_func_ != nullptr) { on_err_func_(err); }
+      if (on_err_func_ != nullptr) {
+        on_err_func_(err);
+      }
+
       return;
     }
 
     for (auto&& [handle, addr] : accepted_handles_) {
-      if (on_conn_func_ != nullptr) { on_conn_func_(handle, addr); }
+      if (on_conn_func_ != nullptr) {
+        on_conn_func_(handle, addr);
+      }
     }
 
     accepted_handles_.clear();

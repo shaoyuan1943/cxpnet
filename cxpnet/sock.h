@@ -4,13 +4,22 @@
 // 平台检测宏
 #if defined(__linux__)
 #define CXP_PLATFORM_LINUX 1
-#elif defined(__APPLE__)
-#define CXP_PLATFORM_MACOS 1
+#elif defined(_WIN32)
+#define CXPNET_PLATFORM_WINDOWS 1
 #else
-#error "Unsupported platform: cxpnet only supports Linux and macOS"
+#error "Unsupported platform: cxpnet only supports Linux and Windows"
 #endif
 
-// 平台无关头文件
+#if defined(CXPNET_PLATFORM_WINDOWS)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -20,7 +29,10 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
 
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -32,10 +44,15 @@
 
 namespace cxpnet {
   class Conn;
+#if defined(CXPNET_PLATFORM_WINDOWS)
+  using socket_t = ::SOCKET;
+  static constexpr socket_t invalid_socket = INVALID_SOCKET;
+#else
   using socket_t                           = int;
-  using SOCKET                             = socket_t;
   static constexpr socket_t invalid_socket = -1;
   static constexpr int      SOCKET_ERROR   = -1;
+#endif
+  using SOCKET = socket_t;
 
   using ConnPtr = std::shared_ptr<Conn>;
   using Closure = std::function<void()>;

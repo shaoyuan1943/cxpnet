@@ -44,29 +44,32 @@ int main(int argc, char* argv[]) {
 
   server.set_conn_user_callback([root](cxpnet::ConnPtr conn) {
     std::weak_ptr<cxpnet::Conn> weak_conn = conn;
-    conn->set_message_callback([root, weak_conn](std::string_view data) {
+    conn->set_message_callback([root, weak_conn, handled = false](cxpnet::Buffer* buffer) mutable {
       auto conn = weak_conn.lock();
       if (!conn) { return; }
+      if (handled) { buffer->consume_all(); return; }
 
-      std::string request(data);
+      constexpr size_t kMaxRequestSize = 4096;
+      std::string_view data(buffer->readable_data(), buffer->readable_size());
+      size_t line_end = data.find('\n');
+      if (line_end == std::string_view::npos && data.size() < kMaxRequestSize) { return; }
+      handled = true;
 
-      if (!request.starts_with("GET ")) {
-        conn->send("ERR unsupported command\n");
-        conn->run_later_in_poll([conn]() {
-          conn->shutdown();
-        });
-        return;
+      std::string response;
+      if (line_end == std::string_view::npos || line_end + 1 > kMaxRequestSize) {
+        response = "ERR request too long\n";
+      } else {
+        std::string_view request = data.substr(0, line_end);
+        if (request.ends_with('\r')) { request.remove_suffix(1); }
+        if (!request.starts_with("GET ")) {
+          response = "ERR unsupported command\n";
+        } else {
+          response = read_file(root, std::string(request.substr(4)));
+        }
       }
 
-      std::string filename = request.substr(4);
-      if (!filename.empty() && filename.back() == '\n') {
-        filename.pop_back();
-      }
-      if (!filename.empty() && filename.back() == '\r') {
-        filename.pop_back();
-      }
-
-      conn->send(read_file(root, filename));
+      buffer->consume_all();
+      conn->send(response);
       conn->run_later_in_poll([conn]() {
         conn->shutdown();
       });

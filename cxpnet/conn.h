@@ -28,7 +28,7 @@ namespace cxpnet {
       kClosed,
     };
   public:
-    Conn(IOEventPoll* event_poll, int handle = invalid_socket);
+    Conn(IOEventPoll* event_poll, socket_t handle = invalid_socket);
     ~Conn();
 
     bool connect(const char* addr, uint16_t port,
@@ -46,7 +46,7 @@ namespace cxpnet {
     std::pair<const char*, uint16_t> remote_addr_and_port() const {
       return std::make_pair(addr_, port_);
     }
-    int  native_handle() const { return handle_; }
+    socket_t native_handle() const { return handle_; }
     bool is_connected() const { return get_state_() == State::kConnected; }
 
     void set_message_callback(std::function<void(std::string_view)> message_func) {
@@ -81,7 +81,7 @@ namespace cxpnet {
 
     // NOT thread-safe！
     // Only invoke this function in OnConnectionCallback
-    void set_read_write_buffer_size(uint read_size, uint write_size) {
+    void set_read_write_buffer_size(unsigned int read_size, unsigned int write_size) {
       if (read_size != 0 && write_size != 0) {
         read_buffer_.reset(new Buffer(read_size));
         write_buffer_.reset(new Buffer(write_size));
@@ -114,7 +114,7 @@ namespace cxpnet {
     void enter_closing_in_poll_();
     void arm_closing_timer_();
     void cancel_closing_timer_();
-    void do_close_in_poll_(int err);
+    void do_close_in_poll_(int err, bool defer_finish = false);
     void finish_close_(int err);
 
     // connect 流程
@@ -125,7 +125,7 @@ namespace cxpnet {
     void retire_channel_();
   private:
     IOEventPoll*                 event_poll_;
-    int                          handle_;
+    socket_t                     handle_;
     std::unique_ptr<Channel>     channel_ {nullptr};
     std::function<void(Buffer*)> on_message_func_ {nullptr};
     std::function<void(int)>     on_close_func_ {nullptr};

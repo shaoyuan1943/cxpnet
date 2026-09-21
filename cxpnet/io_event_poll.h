@@ -50,8 +50,7 @@ namespace cxpnet {
   private:
     std::unique_ptr<PollerBase>            poller_ {nullptr};
     std::unique_ptr<TimerManager>          timer_manager_ {nullptr};
-    int                                    wakeup_handle_ {-1};
-    int                                    wakeup_read_fd_ {-1}; // for macos
+    WakeupHandles                          wakeup_handles_;
     std::unique_ptr<Channel>               wakeup_channel_ {nullptr};
     std::vector<Closure>                   tasks_;
     std::mutex                             mutex_;

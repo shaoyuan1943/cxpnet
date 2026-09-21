@@ -7,7 +7,9 @@ namespace cxpnet {
     event_poll_.set_name("sample_client_poll");
   }
 
-  SampleClient::~SampleClient() { close(); }
+  SampleClient::~SampleClient() {
+    close();
+  }
 
   bool SampleClient::connect() {
     State expected = State::kCreated;
@@ -76,7 +78,9 @@ namespace cxpnet {
       conn_.reset();
     }
 
-    if (conn_snapshot) { conn_snapshot->close(); }
+    if (conn_snapshot) {
+      conn_snapshot->close();
+    }
 
     event_poll_.shutdown();
   }
@@ -88,7 +92,9 @@ namespace cxpnet {
       conn_snapshot = conn_;
     }
 
-    if (conn_snapshot) { conn_snapshot->send(msg, size); }
+    if (conn_snapshot) {
+      conn_snapshot->send(msg, size);
+    }
   }
 
   void SampleClient::send(std::string_view msg) {
@@ -146,18 +152,25 @@ namespace cxpnet {
       on_conn_func = on_conn_func_;
     }
 
-    if (on_conn_func) { on_conn_func(conn); }
+    if (on_conn_func) {
+      on_conn_func(conn);
+    }
   }
 
   void SampleClient::on_connect_error_(int err) {
     std::function<void(int)> on_error_func;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      conn_.reset(); // 失败的 Conn 已进入终态，解除持有
-      if (is_active_()) { on_error_func = on_error_func_; }
+      // 失败的 Conn 已进入终态，解除持有
+      conn_.reset();
+      if (is_active_()) {
+        on_error_func = on_error_func_;
+      }
     }
 
-    if (on_error_func) { on_error_func(err); }
+    if (on_error_func) {
+      on_error_func(err);
+    }
 
     // 连接失败即终态：主动推进到 kClosed 并停掉事件循环，避免 run()/poll() 空转
     State expected = State::kRunning;
@@ -165,6 +178,7 @@ namespace cxpnet {
       event_poll_.shutdown();
       return;
     }
+
     finish_close_if_closing_();
   }
 } // namespace cxpnet

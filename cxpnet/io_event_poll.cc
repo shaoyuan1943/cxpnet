@@ -2,11 +2,12 @@
 #include "channel.h"
 #include "conn.h"
 #include "platform_api.h"
-#include "poller_for_epoll.h"
 #include "timer.h"
 
-#if CXP_PLATFORM_MACOS
-#include "poller_for_kqueue.h"
+#if defined(CXP_PLATFORM_LINUX)
+#include "poller_for_epoll.h"
+#elif defined(CXPNET_PLATFORM_WINDOWS)
+#include "poller_for_wsapoll.h"
 #endif
 
 #include <atomic>
@@ -22,17 +23,14 @@ namespace cxpnet {
 
 #if CXP_PLATFORM_LINUX
     poller_ = std::make_unique<EpollPoller>(this);
-#elif CXP_PLATFORM_MACOS
-    poller_ = std::make_unique<KqueuePoller>(this);
+#elif defined(CXPNET_PLATFORM_WINDOWS)
+    poller_ = std::make_unique<WSAPollPoller>(this);
 #endif
 
-    wakeup_handle_  = Platform::create_wakeup_fd();
-    wakeup_read_fd_ = Platform::get_wakeup_read_fd(wakeup_handle_);
-    timer_manager_  = std::make_unique<TimerManager>([this]() {
-      notify_wakeup_();
-    });
+    wakeup_handles_ = Platform::create_wakeup();
+    timer_manager_  = std::make_unique<TimerManager>([this]() { notify_wakeup_(); });
 
-    wakeup_channel_ = std::make_unique<Channel>(this, wakeup_read_fd_);
+    wakeup_channel_ = std::make_unique<Channel>(this, wakeup_handles_.read);
     wakeup_channel_->set_read_callback(std::bind(&IOEventPoll::handle_wakeup_, this));
     wakeup_channel_->add_read_event();
   }
@@ -45,9 +43,7 @@ namespace cxpnet {
       wakeup_channel_.reset();
     }
 
-    Platform::destroy_wakeup_fd(wakeup_handle_);
-    wakeup_handle_  = invalid_socket;
-    wakeup_read_fd_ = invalid_socket;
+    Platform::destroy_wakeup(wakeup_handles_);
   }
 
   void IOEventPoll::poll() {
@@ -81,7 +77,10 @@ namespace cxpnet {
     if (ACQUIRE_LOAD(closed_)) { return; }
 
     RELEASE_STORE(closed_, true);
-    if (timer_manager_) { timer_manager_->shutdown(); }
+    if (timer_manager_) {
+      timer_manager_->shutdown();
+    }
+
     notify_wakeup_();
   }
 
@@ -102,17 +101,22 @@ namespace cxpnet {
     notify_wakeup_();
   }
 
-  void IOEventPoll::update_channel(Channel* channel) { poller_->update_channel(channel); }
-  void IOEventPoll::unregister_channel(Channel* channel) { poller_->unregister_channel(channel); }
+  void IOEventPoll::update_channel(Channel* channel) {
+    poller_->update_channel(channel);
+  }
 
-  // 已有一个未消费的唤醒信号时跳过重复写，减少高频投递下的 eventfd 系统调用
+  void IOEventPoll::unregister_channel(Channel* channel) {
+    poller_->unregister_channel(channel);
+  }
+
+  // 已有一个未消费的唤醒信号时跳过重复写，减少高频投递下的系统调用
   void IOEventPoll::notify_wakeup_() {
     if (!wakeup_pending_.exchange(true, std::memory_order_acq_rel)) {
-      Platform::wakeup_write(wakeup_handle_);
+      Platform::wakeup_write(wakeup_handles_.write);
     }
   }
   void IOEventPoll::handle_wakeup_() {
-    Platform::wakeup_read(wakeup_read_fd_);
+    Platform::wakeup_read(wakeup_handles_.read);
     RELEASE_STORE(wakeup_pending_, false);
   }
 
@@ -121,6 +125,7 @@ namespace cxpnet {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       if (tasks_.empty()) { return false; }
+
       tasks_.swap(tmp_tasks);
     }
 
@@ -156,7 +161,7 @@ namespace cxpnet {
     run_pending_tasks_();
     run_expired_timers_();
 
-    if (err != 0 && err != EINTR && on_err_func_ != nullptr) {
+    if (err != 0 && err != errors::kInterrupted && on_err_func_ != nullptr) {
       on_err_func_(this, err);
     }
 

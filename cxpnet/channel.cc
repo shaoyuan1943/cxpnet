@@ -1,10 +1,10 @@
-﻿#include "channel.h"
+#include "channel.h"
 #include "check.h"
 #include "io_event_poll.h"
 #include "platform_api.h"
 
 namespace cxpnet {
-  Channel::Channel(IOEventPoll* event_poll, int handle)
+  Channel::Channel(IOEventPoll* event_poll, socket_t handle)
       : event_poll_ {event_poll}
       , handle_ {handle}
       , events_ {0}
@@ -41,7 +41,10 @@ namespace cxpnet {
 
   void Channel::handle_event() {
     if (tied_) {
-      if (auto sp = tie_.lock()) { handle_event_(); }
+      if (auto sp = tie_.lock()) {
+        handle_event_();
+      }
+
       return;
     }
 
@@ -64,13 +67,13 @@ namespace cxpnet {
 
   void Channel::handle_event_() {
     if (result_events_ & events::kError) {
-      int       err     = 0;
-      socklen_t err_len = sizeof(err);
-      getsockopt(handle_, SOL_SOCKET, SO_ERROR, &err, &err_len);
+      int err = Platform::get_socket_error(handle_);
 
       // try recv data before closing
       if (result_events_ & events::kRead) {
-        if (on_read_func_ != nullptr) { on_read_func_(); }
+        if (on_read_func_ != nullptr) {
+          on_read_func_();
+        }
       }
 
       if (on_close_func_ != nullptr) {
@@ -82,20 +85,30 @@ namespace cxpnet {
 
     if (result_events_ & events::kHup) {
       if (result_events_ & events::kRead) {
-        if (on_read_func_ != nullptr) { on_read_func_(); }
+        if (on_read_func_ != nullptr) {
+          on_read_func_();
+        }
+
         return;
       }
 
-      if (on_close_func_ != nullptr) { on_close_func_(0); }
+      if (on_close_func_ != nullptr) {
+        on_close_func_(0);
+      }
+
       return;
     }
 
     if (result_events_ & events::kRead) {
-      if (on_read_func_ != nullptr) { on_read_func_(); }
+      if (on_read_func_ != nullptr) {
+        on_read_func_();
+      }
     }
 
     if (result_events_ & events::kWrite) {
-      if (on_write_func_ != nullptr) { on_write_func_(); }
+      if (on_write_func_ != nullptr) {
+        on_write_func_();
+      }
     }
   }
 } // namespace cxpnet

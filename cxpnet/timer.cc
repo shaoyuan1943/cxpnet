@@ -12,7 +12,9 @@ namespace cxpnet {
   TimerManager::TimerManager(Closure wakeup_func)
       : wakeup_func_(std::move(wakeup_func)) {}
 
-  TimerManager::~TimerManager() { shutdown(); }
+  TimerManager::~TimerManager() {
+    shutdown();
+  }
 
   Timer::TimerID TimerManager::add_timer(uint32_t delay_ms, Timer::Callback cb) {
     bool           should_wakeup = false;
@@ -29,7 +31,10 @@ namespace cxpnet {
       timer_index_.emplace(id, it);
     }
 
-    if (should_wakeup && wakeup_func_) { wakeup_func_(); }
+    if (should_wakeup && wakeup_func_) {
+      wakeup_func_();
+    }
+
     return id;
   }
 
@@ -49,7 +54,9 @@ namespace cxpnet {
       schedule_.erase(scheduled_it);
     }
 
-    if (should_wakeup && wakeup_func_) { wakeup_func_(); }
+    if (should_wakeup && wakeup_func_) {
+      wakeup_func_();
+    }
   }
 
   void TimerManager::shutdown() {
@@ -84,7 +91,9 @@ namespace cxpnet {
     for (auto& callback : expired_callbacks) {
       if (!ACQUIRE_LOAD(running_)) { break; }
 
-      if (callback) { callback(); }
+      if (callback) {
+        callback();
+      }
     }
   }
 

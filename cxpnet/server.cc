@@ -65,7 +65,9 @@ namespace cxpnet {
     for (const auto& shard : conn_shards_) {
       std::lock_guard<std::mutex> lock(shard->mutex);
       for (auto& [handle, conn] : shard->conns) {
-        if (conn) { conns_snapshot.push_back(conn); }
+        if (conn) {
+          conns_snapshot.push_back(conn);
+        }
       }
     }
 
@@ -83,8 +85,13 @@ namespace cxpnet {
   }
 
   void Server::close_polls_() {
-    if (poll_thread_pool_) { poll_thread_pool_->shutdown(); }
-    if (main_poll_) { main_poll_->shutdown(); }
+    if (poll_thread_pool_) {
+      poll_thread_pool_->shutdown();
+    }
+
+    if (main_poll_) {
+      main_poll_->shutdown();
+    }
   }
 
   bool Server::start(RunningMode mode, int thread_num) {
@@ -149,7 +156,7 @@ namespace cxpnet {
     main_poll_->poll();
   }
 
-  void Server::on_conn_close_(int shard_index, int handle) {
+  void Server::on_conn_close_(int shard_index, socket_t handle) {
     if (shard_index >= 0 && shard_index < static_cast<int>(conn_shards_.size())) {
       auto&                       shard = conn_shards_[shard_index];
       std::lock_guard<std::mutex> lock(shard->mutex);
@@ -158,7 +165,7 @@ namespace cxpnet {
   }
 
   void Server::on_acceptor_error_(int err) {
-    if (err == ECANCELED || err == EBADF) { return; }
+    if (err == errors::kCanceled || err == errors::kBadHandle) { return; }
 
     if (on_error_func_ != nullptr) {
       on_error_func_(err);
@@ -173,7 +180,7 @@ namespace cxpnet {
     }
   }
 
-  void Server::on_new_connection_(int handle, struct sockaddr_storage addr_storage) {
+  void Server::on_new_connection_(socket_t handle, struct sockaddr_storage addr_storage) {
     if (handle == invalid_socket) { return; }
 
     if (ACQUIRE_LOAD(state_) != State::kRunning) {
@@ -184,7 +191,7 @@ namespace cxpnet {
     if (max_connections_ > 0 && connection_count() >= max_connections_) {
       Platform::close_handle(handle);
       if (on_error_func_ != nullptr) {
-        on_error_func_(EMFILE);
+        on_error_func_(errors::kTooManyFiles);
       }
 
       return;
@@ -214,7 +221,6 @@ namespace cxpnet {
       event_poll = poll_thread_pool_->next_poll();
       CXPNET_CHECK(event_poll != nullptr, "Invalid event_poll");
 
-      // sub poll 上限 24，线性查找分片下标的开销相对 accept 可忽略
       for (size_t i = 0; i < sub_polls_.size(); ++i) {
         if (sub_polls_[i].get() == event_poll) {
           shard_index = static_cast<int>(i);
@@ -241,6 +247,7 @@ namespace cxpnet {
     event_poll->run_in_poll([this, shard_index, handle, conn, on_conn_func]() {
       if (ACQUIRE_LOAD(state_) != State::kRunning) {
         on_conn_close_(shard_index, handle);
+
         if (conn->handle_ != invalid_socket) {
           Platform::close_handle(conn->handle_);
           conn->handle_ = invalid_socket;

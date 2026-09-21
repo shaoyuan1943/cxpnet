@@ -25,17 +25,37 @@ int main(int argc, char* argv[]) {
 
   server.set_conn_user_callback([](cxpnet::ConnPtr conn) {
     std::weak_ptr<cxpnet::Conn> weak_conn = conn;
-    conn->set_message_callback([weak_conn](std::string_view data) {
+    conn->set_message_callback([weak_conn, handled = false](cxpnet::Buffer* buffer) mutable {
       auto conn = weak_conn.lock();
       if (!conn) { return; }
+      if (handled) { buffer->consume_all(); return; }
 
-      std::string request(data);
+      constexpr size_t kMaxHeaderSize = 16384;
+      std::string_view data(buffer->readable_data(), buffer->readable_size());
+      size_t header_end = data.find("\r\n\r\n");
+      if (header_end == std::string_view::npos && data.size() < kMaxHeaderSize) { return; }
+      handled = true;
 
-      if (request.starts_with("GET / ")) {
-        conn->send(make_response("200 OK", "hello from cxpnet http_server\n"));
+      std::string response;
+      if (header_end == std::string_view::npos || header_end + 4 > kMaxHeaderSize) {
+        response = make_response("431 Request Header Fields Too Large", "request header too long\n");
       } else {
-        conn->send(make_response("404 Not Found", "not found\n"));
+        std::string_view request = data.substr(0, data.find("\r\n"));
+        size_t method_end = request.find(' ');
+        size_t path_end = method_end == std::string_view::npos
+            ? std::string_view::npos : request.find(' ', method_end + 1);
+        if (path_end == std::string_view::npos
+            || (request.substr(path_end + 1) != "HTTP/1.1" && request.substr(path_end + 1) != "HTTP/1.0")) {
+          response = make_response("400 Bad Request", "invalid request line\n");
+        } else if (request.substr(0, method_end) == "GET"
+                   && request.substr(method_end + 1, path_end - method_end - 1) == "/") {
+          response = make_response("200 OK", "hello from cxpnet http_server\n");
+        } else {
+          response = make_response("404 Not Found", "not found\n");
+        }
       }
+      buffer->consume_all();
+      conn->send(response);
       conn->run_later_in_poll([conn]() {
         conn->shutdown();
       });

@@ -10,7 +10,7 @@
 #include <memory>
 
 namespace cxpnet {
-  Conn::Conn(IOEventPoll* event_poll, int handle)
+  Conn::Conn(IOEventPoll* event_poll, socket_t handle)
       : event_poll_ {event_poll}
       , handle_ {handle} {
   }
@@ -75,8 +75,8 @@ namespace cxpnet {
       return false;
     }
 
-    int handle = Platform::connect(addr_storage, false, timeout_ms);
-    if (handle < 0) {
+    socket_t handle = Platform::connect(addr_storage, false, timeout_ms);
+    if (handle == invalid_socket) {
       set_state_(State::kClosed);
       return false;
     }
@@ -93,7 +93,10 @@ namespace cxpnet {
     auto result = done->get_future();
     auto self   = shared_from_this();
     event_poll_->run_in_poll([self, done]() {
-      if (self->get_state_() == State::kConnecting) { self->start_(); }
+      if (self->get_state_() == State::kConnecting) {
+        self->start_();
+      }
+
       done->set_value(self->is_connected());
     });
 
@@ -108,21 +111,30 @@ namespace cxpnet {
     ProtocolStack proto_stack = (ip_type == IPType::kIPv4) ? ProtocolStack::kIPv4Only : ProtocolStack::kIPv6Only;
     if (ip_type == IPType::kInvalid) {
       set_state_(State::kClosed);
-      if (on_connect_error_func_) { on_connect_error_func_(EINVAL); }
+      if (on_connect_error_func_) {
+        on_connect_error_func_(errors::kInvalidArgument);
+      }
+
       return;
     }
 
     struct sockaddr_storage addr_storage = Platform::get_sockaddr(addr, port, proto_stack);
     if (addr_storage.ss_family == 0) {
       set_state_(State::kClosed);
-      if (on_connect_error_func_) { on_connect_error_func_(EINVAL); }
+      if (on_connect_error_func_) {
+        on_connect_error_func_(errors::kInvalidArgument);
+      }
+
       return;
     }
 
-    int handle = Platform::connect(addr_storage);
-    if (handle < 0) {
+    socket_t handle = Platform::connect(addr_storage);
+    if (handle == invalid_socket) {
       set_state_(State::kClosed);
-      if (on_connect_error_func_) { on_connect_error_func_(Platform::get_last_error()); }
+      if (on_connect_error_func_) {
+        on_connect_error_func_(Platform::get_last_error());
+      }
+
       return;
     }
 
@@ -161,7 +173,9 @@ namespace cxpnet {
     }
 
     set_state_(State::kClosed);
-    if (on_connect_error_func_) { on_connect_error_func_(ETIMEDOUT); }
+    if (on_connect_error_func_) {
+      on_connect_error_func_(errors::kTimedOut);
+    }
   }
 
   void Conn::cancel_connect_timer_() {
@@ -191,10 +205,7 @@ namespace cxpnet {
     // err == 0 来自写事件/HUP 路径，Channel 未预取 SO_ERROR，需要自行读取；
     // 非 0 来自 Channel 的 EPOLLERR 分支——SO_ERROR 读一次即被清除，不能重读
     if (err == 0) {
-      socklen_t len = sizeof(err);
-      if (getsockopt(handle_, SOL_SOCKET, SO_ERROR, &err, &len) < 0) {
-        err = Platform::get_last_error();
-      }
+      err = Platform::get_socket_error(handle_);
     }
 
     if (err != 0) {
@@ -206,14 +217,19 @@ namespace cxpnet {
       }
 
       set_state_(State::kClosed);
-      if (on_connect_error_func_) { on_connect_error_func_(err); }
+      if (on_connect_error_func_) {
+        on_connect_error_func_(err);
+      }
+
       return;
     }
 
     retire_channel_();
     start_();
 
-    if (on_connected_func_) { on_connected_func_(shared_from_this()); }
+    if (on_connected_func_) {
+      on_connected_func_(shared_from_this());
+    }
   }
 
   // 可能跨线程调用，shutdown 里面不要访问 handle_ 或 channel_
@@ -247,7 +263,9 @@ namespace cxpnet {
 
     // 对端 FIN 后冲刷中的连接不主动装定时器（慢速但存活的传输必须完整送达）；
     // 只在 shutdown 明确要求收敛时才补硬期限，避免 Server::shutdown 永远等不到它
-    if (state == State::kClosing) { arm_closing_timer_(); }
+    if (state == State::kClosing) {
+      arm_closing_timer_();
+    }
   }
 
   void Conn::enter_closing_in_poll_() {
@@ -259,7 +277,10 @@ namespace cxpnet {
     set_state_(State::kClosing);
 
     if (!write_buffer_ || write_buffer_->readable_size() == 0) {
-      if (channel_) { channel_->remove_write_event(); }
+      if (channel_) {
+        channel_->remove_write_event();
+      }
+
       Platform::shut_wr(handle_);
     }
 
@@ -278,7 +299,7 @@ namespace cxpnet {
         [weak_self]() {
           if (auto self = weak_self.lock()) {
             self->event_poll_->run_in_poll([self]() {
-              self->do_close_in_poll_(ETIMEDOUT);
+              self->do_close_in_poll_(errors::kTimedOut);
             });
           }
         });
@@ -304,7 +325,7 @@ namespace cxpnet {
     event_poll_->run_later(std::move(func));
   }
 
-  void Conn::do_close_in_poll_(int err) {
+  void Conn::do_close_in_poll_(int err, bool defer_finish) {
     CXPNET_CHECK(event_poll_->is_in_poll_thread(), "Must in IO thread");
 
     State old_state = state_.exchange(State::kClosed, std::memory_order_acq_rel);
@@ -313,22 +334,39 @@ namespace cxpnet {
 
     cancel_closing_timer_();
     cancel_connect_timer_();
+
+    if (defer_finish) {
+      event_poll_->run_later([self = shared_from_this(), err]() {
+        self->finish_close_(err);
+      });
+
+      return;
+    }
+
     finish_close_(err);
   }
 
   void Conn::finish_close_(int err) {
-    if (channel_) { channel_->unregister(); }
+    if (channel_) {
+      channel_->unregister();
+    }
+
+    // 先移除注册，避免 close 后被新连接复用的 handle 遭旧连接误删
+    auto internal_close_callback = std::move(internal_close_callback_);
+    auto close_func              = std::move(on_close_func_);
+
+    if (internal_close_callback) {
+      internal_close_callback();
+    }
 
     if (handle_ != invalid_socket) {
       Platform::close_handle(handle_);
       handle_ = invalid_socket;
     }
 
-    auto internal_close_callback = std::move(internal_close_callback_);
-    auto close_func              = std::move(on_close_func_);
-
-    if (internal_close_callback) { internal_close_callback(); }
-    if (close_func) { close_func(err); }
+    if (close_func) {
+      close_func(err);
+    }
 
     on_message_func_       = nullptr;
     on_connected_func_     = nullptr;
@@ -337,6 +375,8 @@ namespace cxpnet {
     if (channel_) {
       Channel* raw_channel    = channel_.release();
       auto     channel_shared = std::shared_ptr<Channel>(raw_channel);
+
+      // 通过 std::function 实现延迟销毁
       event_poll_->run_later([channel_shared]() {});
     }
   }
@@ -384,8 +424,13 @@ namespace cxpnet {
     CXPNET_CHECK(event_poll_->is_in_poll_thread(), "Must in IO thread");
     if (handle_ == invalid_socket || is_connected()) { return; }
 
-    if (!read_buffer_) { read_buffer_ = std::make_unique<Buffer>(); }
-    if (!write_buffer_) { write_buffer_ = std::make_unique<Buffer>(); }
+    if (!read_buffer_) {
+      read_buffer_ = std::make_unique<Buffer>();
+    }
+
+    if (!write_buffer_) {
+      write_buffer_ = std::make_unique<Buffer>();
+    }
 
     channel_ = std::make_unique<Channel>(event_poll_, handle_);
     channel_->set_read_callback([this]() { handle_read_event_(); });
@@ -410,7 +455,7 @@ namespace cxpnet {
         read_buffer_->ensure_writable_size(1024 * 2);
       }
 
-      int read_n = ::recv(handle_, read_buffer_->writable_data(), read_buffer_->writable_size(), 0);
+      int read_n = Platform::recv(handle_, read_buffer_->writable_data(), read_buffer_->writable_size());
       if (read_n > 0) {
         read_buffer_->commit_write(read_n);
         has_new_data = true;
@@ -439,10 +484,15 @@ namespace cxpnet {
     // 关闭本端读
     if (peer_closed) {
       close_after_write_ = true;
-      if (channel_) { channel_->remove_read_event(); }
+      if (channel_) {
+        channel_->remove_read_event();
+      }
     }
 
-    if (has_new_data && on_message_func_ != nullptr) { on_message_func_(read_buffer_.get()); }
+    // 残留的数据先抛到应用层
+    if (has_new_data && on_message_func_ != nullptr) {
+      on_message_func_(read_buffer_.get());
+    }
 
     if (should_close) {
       handle_close_event_(close_reason_err);
@@ -488,7 +538,9 @@ namespace cxpnet {
       }
 
       // 关闭过程中，IOEventPoll 还在驱动中，写完之后进行写端关闭
-      if (get_state_() == State::kClosing) { Platform::shut_wr(handle_); }
+      if (get_state_() == State::kClosing) {
+        Platform::shut_wr(handle_);
+      }
     }
   }
 
@@ -525,7 +577,7 @@ namespace cxpnet {
         if (action == ErrorAction::kBreak) { break; }
         if (action == ErrorAction::kContinue) { continue; }
 
-        handle_close_event_(err);
+        do_close_in_poll_(err, true);
         return;
       }
 

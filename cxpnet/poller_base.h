@@ -1,4 +1,4 @@
-﻿#ifndef POLLER_BASE_H
+#ifndef POLLER_BASE_H
 #define POLLER_BASE_H
 
 #include "sock.h"
@@ -20,12 +20,12 @@ namespace cxpnet {
     virtual void update_channel(Channel* channel)                          = 0;
     virtual void unregister_channel(Channel* channel)                      = 0;
 
-    bool has_channel(int handle) const {
+    bool has_channel(socket_t handle) const {
       return channels_.find(handle) != channels_.end();
     }
   protected:
     IOEventPoll*                      owner_poll_ = nullptr;
-    std::unordered_map<int, Channel*> channels_;
+    std::unordered_map<socket_t, Channel*> channels_;
   };
 
 } // namespace cxpnet

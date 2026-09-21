@@ -1,4 +1,4 @@
-﻿#ifndef CHANNEL_H
+#ifndef CHANNEL_H
 #define CHANNEL_H
 
 #include "platform_api.h"
@@ -11,7 +11,7 @@ namespace cxpnet {
   // 使用统一的事件常量，平台无关
   class Channel {
   public:
-    Channel(IOEventPoll* event_poll, int handle);
+    Channel(IOEventPoll* event_poll, socket_t handle);
     ~Channel() {}
 
     void unregister();
@@ -22,7 +22,7 @@ namespace cxpnet {
     void handle_event();
     void tie(const std::shared_ptr<void>& ptr);
 
-    int          handle() const { return handle_; }
+    socket_t     handle() const { return handle_; }
     int          events() const { return events_; }
     void         set_result_events(int events) { result_events_ = events; }
     bool         is_reading() const { return events_ & events::kRead; }
@@ -30,15 +30,21 @@ namespace cxpnet {
     IOEventPoll* event_poll() const { return event_poll_; }
     bool         is_none_event() const { return events_ == events::kNone; }
 
-    void set_read_callback(std::function<void()>&& func) { on_read_func_ = std::move(func); }
-    void set_write_callback(std::function<void()>&& func) { on_write_func_ = std::move(func); }
-    void set_close_callback(std::function<void(int)>&& func) { on_close_func_ = std::move(func); }
+    void set_read_callback(std::function<void()>&& func) {
+      on_read_func_ = std::move(func);
+    }
+    void set_write_callback(std::function<void()>&& func) {
+      on_write_func_ = std::move(func);
+    }
+    void set_close_callback(std::function<void(int)>&& func) {
+      on_close_func_ = std::move(func);
+    }
   private:
     void update_();
     void handle_event_();
   private:
     IOEventPoll*             event_poll_;
-    int                      handle_;
+    socket_t                 handle_;
     int                      events_;
     int                      result_events_;
     bool                     tied_;

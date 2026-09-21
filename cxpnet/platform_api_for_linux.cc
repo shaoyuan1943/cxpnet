@@ -165,8 +165,13 @@ namespace cxpnet {
     }
 
     size_t addr_len = 0;
-    if (addr_storage.ss_family == AF_INET) { addr_len = sizeof(sockaddr_in); }
-    if (addr_storage.ss_family == AF_INET6) { addr_len = sizeof(sockaddr_in6); }
+    if (addr_storage.ss_family == AF_INET) {
+      addr_len = sizeof(sockaddr_in);
+    }
+
+    if (addr_storage.ss_family == AF_INET6) {
+      addr_len = sizeof(sockaddr_in6);
+    }
 
     // EINPROGRESS is mean of async operation is in progress, ignore this error code
     int result = ::connect(handle, reinterpret_cast<sockaddr*>(&addr_storage), addr_len);
@@ -207,24 +212,30 @@ namespace cxpnet {
     return static_cast<int>(::send(fd, data, size, MSG_NOSIGNAL));
   }
 
+  int Platform::recv(socket_t fd, char* data, size_t size) {
+    return static_cast<int>(::recv(fd, data, size, 0));
+  }
+
+  int Platform::get_socket_error(socket_t fd) {
+    int       err = 0;
+    socklen_t len = sizeof(err);
+    if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0) { return errno; }
+    return err;
+  }
+
   void Platform::shut_wr(int fd) {
     ::shutdown(fd, SHUT_WR);
   }
 
   // 使用 eventfd 实现 wakeup
-  int Platform::create_wakeup_fd() {
+  WakeupHandles Platform::create_wakeup() {
     int fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    return fd;
+    return {fd, fd};
   }
 
-  // eventfd 读写端相同
-  int Platform::get_wakeup_read_fd(int fd) {
-    return fd;
-  }
-
-  void Platform::destroy_wakeup_fd(int fd) {
-    if (fd >= 0) {
-      close_handle(fd);
+  void Platform::destroy_wakeup(WakeupHandles handles) {
+    if (handles.read >= 0) {
+      close_handle(handles.read);
     }
   }
 
