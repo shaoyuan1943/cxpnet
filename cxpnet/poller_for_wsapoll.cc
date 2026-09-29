@@ -4,6 +4,9 @@
 #include "io_event_poll.h"
 
 namespace cxpnet {
+  // 与 EpollPoller::shutdown() 同理，当前无调用点：注册表由每条 Conn 的关闭路径逐条摘除。
+  // 这里用的是 clear() 而非逐条 unregister，一旦被启用，留存的 Channel 会被静默丢弃而不是
+  // 走正常注销流程；启用前需要确认调用时机不会让活着的 Channel 指针失去追踪。
   void WSAPollPoller::shutdown() { channels_.clear(); }
 
   void WSAPollPoller::update_channel(Channel* channel) {

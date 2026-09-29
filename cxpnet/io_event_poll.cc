@@ -81,6 +81,9 @@ namespace cxpnet {
       timer_manager_->shutdown();
     }
 
+    // 这里不调用 poller_->shutdown()：poller 的 channel 注册表由每条 Conn 在自己的
+    // 关闭路径上经 unregister_channel() 摘除，正常收敛后本就是空的；唤醒 channel 则在
+    // 析构函数里显式 unregister。poller_ 本身活到 IOEventPoll 析构，无需在此提前清理。
     notify_wakeup_();
   }
 

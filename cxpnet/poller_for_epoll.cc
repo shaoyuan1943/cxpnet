@@ -17,6 +17,9 @@ namespace cxpnet {
     }
   }
 
+  // 当前无调用点：IOEventPoll::shutdown() 只置位 closed_ 并停定时器，不销毁 poller。
+  // channels_ 由每条 Conn 的关闭路径逐条 unregister_channel 摘除，因此这里通常已经是空的。
+  // 若将来改成在 IOEventPoll 关停时批量清理，注意本函数必须运行在所属 poll 线程上。
   void EpollPoller::shutdown() {
     while (!channels_.empty()) {
       auto it = channels_.begin();
